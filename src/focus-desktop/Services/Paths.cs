@@ -1,3 +1,4 @@
+using System.IO;
 namespace focus_desktop.Services;
 
 /// <summary>路径约定（便携布局：所有运行数据在 exe 旁的 focus-desktop-data/）。</summary>

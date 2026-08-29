@@ -51,6 +51,10 @@ public partial class App : Application
             _focus.Recover();
         }
 
+        // 配置：首次运行生成默认 config.json（白名单/退出语/学习目录，Step 3+ 使用）
+        var settings = AppSettings.LoadOrDefault();
+        settings.Save();
+
         var main = new MainWindow(_options, _focus);
         MainWindow = main;
 

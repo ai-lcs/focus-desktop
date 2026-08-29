@@ -1,0 +1,3 @@
+rest-fg: Hermes
+win-fg:  ËÑË÷
+esc-fg:  Hermes

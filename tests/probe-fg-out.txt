@@ -1,0 +1,3 @@
+1 rest:        Chrome_WidgetWin_1 | ChatGPT
+2 win-pressed: Chrome_WidgetWin_1 | ChatGPT
+3 esc:         Chrome_WidgetWin_1 | ChatGPT

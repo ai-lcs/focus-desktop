@@ -58,12 +58,22 @@ public partial class MainWindow : Window
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
-        App.SmokeLog("window: content rendered");
+        // 显式夺取前台：Windows ForegroundLockTimeout 可能阻止新进程抢焦点，
+        // 导致全屏窗口盖住屏幕但键盘焦点留在身后的窗口——kiosk 致命缺陷
+        Activate();
+        var hwnd = new WindowInteropHelper(this).Handle;
+        SetForegroundWindow(hwnd);
+        App.SmokeLog("window: content rendered, foreground claimed");
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     private void ExitButton_Click(object sender, RoutedEventArgs e)
     {
-        // Step 1+2：直接退出（钩子 WM_CLOSE 防线因焦点模式即将退出而放行）
+        // 先解锁再关窗：WndProc 的 WM_CLOSE 防线查 _focus.IsActive，
+        // 若先 Shutdown 后 Exit，Shutdown 发的 WM_CLOSE 会被自己防线吃掉 → 窗口关不掉
+        _focus.Exit();
         // Step 6 会在这里插入退出文本验证
         App.SmokeLog("exit button clicked");
         Application.Current.Shutdown();
