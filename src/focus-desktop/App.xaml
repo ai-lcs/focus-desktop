@@ -1,0 +1,15 @@
+<Application x:Class="focus_desktop.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
+    <Application.Resources>
+        <!-- 全局深色配色 -->
+        <SolidColorBrush x:Key="BgBrush" Color="#202124"/>
+        <SolidColorBrush x:Key="PanelBrush" Color="#2A2B2F"/>
+        <SolidColorBrush x:Key="FgBrush" Color="#E8EAED"/>
+        <SolidColorBrush x:Key="MutedBrush" Color="#9AA0A6"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#8AB4F8"/>
+        <SolidColorBrush x:Key="DangerBrush" Color="#F28B82"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#3C4043"/>
+    </Application.Resources>
+</Application>

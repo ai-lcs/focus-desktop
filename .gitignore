@@ -1,0 +1,13 @@
+# 构建产物
+bin/
+obj/
+*.user
+
+# 运行时数据（本机个人配置与登录态，绝不进 git）
+DeskHubData/
+config.json
+
+# IDE
+.vs/
+.vscode/
+.idea/
