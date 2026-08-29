@@ -37,6 +37,8 @@ public class AppSettings
         "login.live.com",
     };
 
+    public static bool Exists() => File.Exists(Paths.ConfigFile);
+
     public static AppSettings LoadOrDefault()
     {
         try

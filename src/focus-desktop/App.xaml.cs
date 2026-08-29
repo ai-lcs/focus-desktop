@@ -60,25 +60,22 @@ public partial class App : Application
 
         if (_options.Smoke)
         {
-            SmokeLog("startup: window created, smoke mode (no focus lock)");
-            var t = new System.Windows.Threading.DispatcherTimer
-            {
-                Interval = TimeSpan.FromSeconds(4)
-            };
-            t.Tick += (_, _) =>
-            {
-                t.Stop();
-                SmokeLog("auto-shutdown timer fired");
-                Shutdown();
-            };
-            t.Start();
+            SmokeLog("startup: smoke mode (no focus lock)");
+            // 自动退出 timer 在 MainWindow.InitAsync 里（15 秒，含 Web 层初始化验证）
         }
 
         main.Show();
 
-        if (!_options.Dev && !_options.Smoke)
+        // 锁定策略：--smoke 永不锁；首次运行（无 config.json）进 Setup 模式（不锁，
+        // 让用户自由登录各站/确认设置，spec §9）；此后每次启动直接锁定
+        if (!_options.Dev && !_options.Smoke && !FirstRunSetup.IsSetupComplete())
         {
-            _focus.Enter(); // 真实模式：进锁定。dev/smoke 不锁。
+            FirstRunSetup.EnterSetupMode();
+            App.SmokeLog("first-run setup mode (no lock)");
+        }
+        else if (!_options.Dev && !_options.Smoke)
+        {
+            _focus.Enter(); // 真实模式：进锁定
         }
     }
 

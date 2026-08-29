@@ -103,6 +103,9 @@ Write-Host "`n=== focus-desktop 停点① 自动验收 ===" -ForegroundColor Cya
 Info "前置：清理残留实例"
 Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
+# 预置 setup_done.flag（模拟已完成首次设置；否则应用进 Setup 模式不锁定）
+$setupFlag = Join-Path $DataDir "setup_done.flag"
+if (-not (Test-Path $setupFlag)) { Set-Content -Path $setupFlag -Value "verify" -Encoding UTF8 }
 
 # ---------- 1. 正常模式启动（真实锁定）----------
 Info "启动 focus-desktop（真实锁定模式）……"
@@ -193,6 +196,24 @@ $btn = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond
 if ($btn) {
     $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $invoke.Invoke()
+    Start-Sleep -Milliseconds 1200
+    # 退出验证弹窗：读取 config.json 的退出语填入，再点"确认退出"
+    $cfgFile = Join-Path $DataDir "config.json"
+    $phrase = (Get-Content $cfgFile -Raw | ConvertFrom-Json).exitPhrase
+    $inputCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty, "TextBox")
+    $inputBox = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $inputCond)
+    if ($inputBox) {
+        $vp = $inputBox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        $vp.SetValue($phrase)
+        Start-Sleep -Milliseconds 400
+        $okCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty, "确认退出")
+        $okBtn = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $okCond)
+        if ($okBtn) {
+            ($okBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+        } else { Fail "干净退出" "UIA 未找到确认退出按钮" }
+    } else { Fail "干净退出" "UIA 未找到输入框" }
     Start-Sleep -Milliseconds 2500
     if (-not (Get-Process "focus-desktop" -ErrorAction SilentlyContinue)) {
         Pass "干净退出（UIA 点击退出 → 进程退出）"

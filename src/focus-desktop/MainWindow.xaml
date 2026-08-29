@@ -11,27 +11,70 @@
         Foreground="{DynamicResource FgBrush}"
         UseLayoutRounding="True">
 
+    <Window.Resources>
+        <Style x:Key="NavBtn" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource FgBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="22,12"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="48"/>
+            <RowDefinition Height="44"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- 顶栏：时间 | DEV 角标 | 退出 -->
+        <!-- 顶栏：Tab 条 | 时钟 | 音量 | DEV | 退出 -->
         <Border Grid.Row="0" Background="{DynamicResource PanelBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-            <Grid Margin="20,0">
-                <TextBlock x:Name="ClockText" Text="00:00:00"
-                           FontSize="18" FontFamily="Consolas"
-                           VerticalAlignment="Center" HorizontalAlignment="Left"
-                           Foreground="{DynamicResource FgBrush}"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <Grid Margin="12,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Tab 条 -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
+
+                <!-- 时钟 -->
+                <TextBlock Grid.Column="1" x:Name="ClockText" Text="00:00:00"
+                           FontSize="15" FontFamily="Consolas" Margin="16,0"
+                           VerticalAlignment="Center" Foreground="{DynamicResource FgBrush}"/>
+
+                <!-- 音量 -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <TextBlock Text="🔊" FontSize="14" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <Slider x:Name="VolumeSlider" Width="90" Minimum="0" Maximum="100"
+                            VerticalAlignment="Center" ValueChanged="VolumeSlider_ValueChanged"/>
+                </StackPanel>
+
+                <!-- DEV + 退出 -->
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border x:Name="DevBadge" Background="#5F5B00" CornerRadius="4" Padding="8,2" Margin="0,0,12,0"
                             Visibility="Collapsed">
                         <TextBlock Text="DEV" FontSize="12" FontWeight="Bold" Foreground="#FDD663"/>
                     </Border>
                     <Button x:Name="ExitButton" Content="退出"
-                            FontSize="14" Padding="16,6"
+                            FontSize="13" Padding="14,5"
                             Background="Transparent"
                             Foreground="{DynamicResource DangerBrush}"
                             BorderBrush="{DynamicResource DangerBrush}" BorderThickness="1"
@@ -40,27 +83,90 @@
             </Grid>
         </Border>
 
-        <!-- 主区：Step 1+2 的占位内容 = 停点①实测清单 -->
-        <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="640">
-            <TextBlock Text="focus-desktop" FontSize="40" FontWeight="Bold"
-                       HorizontalAlignment="Center" Foreground="{DynamicResource AccentBrush}"/>
-            <TextBlock Text="专注学习环境 · Step 1+2 壳层" FontSize="16" Margin="0,8,0,36"
-                       HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+        <!-- 主区：各视图容器（代码切换 Visibility） -->
+        <Grid Grid.Row="1">
+            <!-- Home：计时器 -->
+            <StackPanel x:Name="HomeView" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock x:Name="TimerBig" Text="00:00:00" FontSize="84" FontWeight="Light"
+                           FontFamily="Consolas"
+                           Foreground="{DynamicResource FgBrush}" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="TimerHint" Text="正计时 · 空格 开始/暂停" FontSize="14" Margin="0,6,0,32"
+                           HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                <WrapPanel HorizontalAlignment="Center">
+                    <Button Style="{StaticResource NavBtn}" Content="学习文件" Margin="5" Click="Nav_Files_Click"/>
+                    <Button Style="{StaticResource NavBtn}" Content="Bilibili" Margin="5" Click="Nav_Bili_Click"/>
+                    <Button Style="{StaticResource NavBtn}" Content="ChatGPT" Margin="5" Click="Nav_ChatGPT_Click"/>
+                    <Button Style="{StaticResource NavBtn}" Content="Gemini" Margin="5" Click="Nav_Gemini_Click"/>
+                    <Button Style="{StaticResource NavBtn}" Content="DeepSeek" Margin="5" Click="Nav_DeepSeek_Click"/>
+                </WrapPanel>
+            </StackPanel>
 
-            <Border Background="{DynamicResource PanelBrush}" CornerRadius="8" Padding="24"
-                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+            <!-- 学习文件 -->
+            <Grid x:Name="FilesView" Visibility="Collapsed" Margin="24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Content="← 返回" Grid.Column="0" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13"
+                            Click="Files_Back_Click"/>
+                    <TextBox x:Name="SearchBox" Grid.Column="1" Margin="16,0" FontSize="14" Padding="8,6"
+                             VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged"
+                             Background="{DynamicResource PanelBrush}"
+                             Foreground="{DynamicResource FgBrush}"
+                             BorderBrush="{DynamicResource BorderBrush}"/>
+                    <Button Content="🏠 根目录" Grid.Column="2" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13"
+                            Click="Files_Root_Click"/>
+                </Grid>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="FileList"/>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- WebView 宿主（WindowsFormsHost 承载 WebView2 WinForms 控件） -->
+            <Grid x:Name="WebHost" Visibility="Collapsed">
+                <WindowsFormsHost x:Name="WfHost" Background="Transparent"/>
+            </Grid>
+        </Grid>
+
+        <!-- 被拦截提示条 -->
+        <Border x:Name="BlockedBar" Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Center"
+                Background="#5C1F1F" BorderBrush="#E5534B" BorderThickness="1" CornerRadius="6"
+                Padding="16,8" Margin="0,12,0,0" Visibility="Collapsed">
+            <TextBlock x:Name="BlockedText" Text="" FontSize="13" Foreground="#FAD2CF"/>
+        </Border>
+
+        <!-- 退出验证弹窗（Step 6） -->
+        <Grid x:Name="ExitDialog" Visibility="Collapsed" Background="#CC000000">
+            <Border VerticalAlignment="Center" HorizontalAlignment="Center"
+                    Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1" CornerRadius="12" Padding="32" Width="520">
                 <StackPanel>
-                    <TextBlock Text="停点①实测清单" FontSize="16" FontWeight="Bold" Margin="0,0,0,12"/>
-                    <TextBlock Text="按 Win 键 —— 开始菜单不应弹出" FontSize="14" Margin="0,4"/>
-                    <TextBlock Text="按 Alt+Tab —— 不应切到其他应用" FontSize="14" Margin="0,4"/>
-                    <TextBlock Text="按 Alt+F4 —— 本窗口不应关闭" FontSize="14" Margin="0,4"/>
-                    <TextBlock Text="按 Ctrl+Shift+Esc —— 任务管理器【应该】能打开（救生通道）" FontSize="14" Margin="0,4"/>
-                    <TextBlock Text="按 Esc —— 本软件不处理（留给网页全屏退出，Step 3 验证）" FontSize="14" Margin="0,4"/>
-                    <TextBlock Text="任务栏 —— 当前应为隐藏状态" FontSize="14" Margin="0,4"/>
-                    <TextBlock Text="点右下角退出 —— 任务栏应恢复（本阶段免退出文本，Step 6 上线）"
-                               FontSize="14" Margin="0,4"/>
+                    <TextBlock Text="确认离开专注环境" FontSize="20" FontWeight="Bold" Margin="0,0,0,8"/>
+                    <TextBlock Text="请完整输入以下句子以退出：" FontSize="14" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12"/>
+                    <Border Background="{DynamicResource BgBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                        <TextBlock x:Name="ExitPhraseText" Text="" FontSize="15" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AccentBrush}"/>
+                    </Border>
+                    <TextBox x:Name="ExitInput" FontSize="15" Padding="10,8" KeyDown="ExitInput_KeyDown"
+                             Background="{DynamicResource BgBrush}"
+                             Foreground="{DynamicResource FgBrush}"
+                             BorderBrush="{DynamicResource BorderBrush}"/>
+                    <TextBlock x:Name="ExitError" Text="" FontSize="12" Foreground="{DynamicResource DangerBrush}" Margin="0,8,0,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                        <Button Content="留在这里" Style="{StaticResource NavBtn}" Padding="16,8" FontSize="13" Margin="0,0,10,0"
+                                Click="ExitCancel_Click"/>
+                        <Button Content="确认退出" Style="{StaticResource NavBtn}" Padding="16,8" FontSize="13"
+                                Background="#5C1F1F" BorderBrush="#E5534B"
+                                Click="ExitConfirm_Click"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
-        </StackPanel>
+        </Grid>
     </Grid>
 </Window>
