@@ -21,6 +21,15 @@ public partial class App : Application
         _options = AppOptions.Parse(e.Args);
         WireGlobalExceptionHandlers();
 
+        // --urltest：白名单逻辑自测（无 UI，控制台输出即退）
+        if (e.Args.Contains("--urltest"))
+        {
+            var code = Tests.UrlSelfTest.Run();
+            Shutdown();
+            Environment.Exit(code);
+            return;
+        }
+
         // --restore：纯恢复模式。不进 UI，恢复完就退。
         if (_options.Restore)
         {
