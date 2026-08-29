@@ -1,8 +1,0 @@
-=== 1. 静息状态（开始菜单应未弹出）===
-[Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows Shell Experience 主机 vis=True] [新通知 vis=True] [搜索 vis=True] [开始 vis=True] [Windows Shell Experience 主机 vis=True] [DesktopWindowXamlSource vis=False] [设置 vis=True] [DesktopWindowXamlSource vis=False] [DesktopWindowXamlSource vis=False] [Windows 输入体验 vis=True] 
-
-=== 2. 注入 Win 键（本机此刻无 focus-desktop 运行，开始菜单应弹出）===
-[Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows Shell Experience 主机 vis=True] [新通知 vis=True] [搜索 vis=True] [开始 vis=True] [Windows Shell Experience 主机 vis=True] [DesktopWindowXamlSource vis=False] [设置 vis=True] [DesktopWindowXamlSource vis=False] [DesktopWindowXamlSource vis=False] [Windows 输入体验 vis=True] 
-
-=== 3. 按 Esc 关闭开始菜单 ===
-[Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows 输入体验 vis=True] [Windows Shell Experience 主机 vis=True] [新通知 vis=True] [搜索 vis=True] [开始 vis=True] [Windows Shell Experience 主机 vis=True] [DesktopWindowXamlSource vis=False] [设置 vis=True] [DesktopWindowXamlSource vis=False] [DesktopWindowXamlSource vis=False] [Windows 输入体验 vis=True] 
