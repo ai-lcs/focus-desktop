@@ -217,6 +217,15 @@ public partial class MainWindow : Window
             _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
 
             BuildTabBar();
+
+            // 后台预热（懒加载的补充）：启动 3 秒后错峰逐个建控件+导航，隐藏加载。
+            // 用户首次点击时页面已就绪 —— 消除连点四站时每个都白屏/黑屏数秒的剧烈卡顿。
+            // 与手点并发安全（EnsureTabAsync 内 _creating 去重）。
+            _ = Task.Delay(3000).ContinueWith(async _ =>
+            {
+                try { await _web.WarmupAllAsync(_hostPanel!); }
+                catch (Exception ex) { CrashReporter.Write(ex, "warmup"); }
+            });
         }
         catch (Exception ex)
         {

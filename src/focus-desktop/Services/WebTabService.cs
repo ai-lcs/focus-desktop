@@ -53,7 +53,10 @@ public sealed class WebTabService : IDisposable
         }
     }
 
-    /// <summary>首次激活/崩溃重建时调用：真正创建 WebView2 控件。</summary>
+    /// <summary>首次激活/后台预热时调用：真正创建 WebView2 控件。
+    /// 预热与手点并发时用 _creating 去重，防止同一 Tab 创建两个控件。</summary>
+    private readonly HashSet<string> _creating = new();
+
     public async Task<TabInfo> EnsureTabAsync(string id, System.Windows.Forms.Control host)
     {
         var idx = _tabs.FindIndex(t => t.Id == id);
@@ -61,21 +64,56 @@ public sealed class WebTabService : IDisposable
         var info = _tabs[idx];
         if (info.View != null) return info; // 已建
 
-        if (_env == null) throw new InvalidOperationException("先调 EnsureEnvironmentAsync");
-        var view = new Microsoft.Web.WebView2.WinForms.WebView2 { Dock = DockStyle.Fill };
-        host.Controls.Add(view);
-        await view.EnsureCoreWebView2Async(_env);
+        if (_creating.Contains(id))
+        {
+            // 另一个创建正在进行（预热中用户点了）：等它完成
+            while (_creating.Contains(id)) await Task.Delay(100);
+            return _tabs.First(t => t.Id == id);
+        }
+        _creating.Add(id);
+        try
+        {
+            if (_env == null) throw new InvalidOperationException("先调 EnsureEnvironmentAsync");
+            var view = new Microsoft.Web.WebView2.WinForms.WebView2
+            {
+                Dock = DockStyle.Fill,
+                // 加载期间底色=主题深灰（默认白会在暗色站点上闪白屏——录屏确认的白屏就是它）
+                DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x23, 0x26, 0x2C),
+            };
+            host.Controls.Add(view);
+            await view.EnsureCoreWebView2Async(_env);
 
-        var cfg = AppSettings.LoadOrDefault();
-        WirePolicy(view, cfg);
-        WireTitleSync(id, info.Title, view);
-        WireProcessFailed(view);
+            var cfg = AppSettings.LoadOrDefault();
+            WirePolicy(view, cfg);
+            WireTitleSync(id, info.Title, view);
+            WireProcessFailed(view);
 
-        if (!string.IsNullOrEmpty(info.InitialUrl))
-            view.CoreWebView2.Navigate(info.InitialUrl);
-        info = info with { View = view };
-        _tabs[idx] = info;
-        return info;
+            if (!string.IsNullOrEmpty(info.InitialUrl))
+                view.CoreWebView2.Navigate(info.InitialUrl);
+            info = info with { View = view };
+            _tabs[idx] = info;
+            return info;
+        }
+        finally
+        {
+            _creating.Remove(id);
+        }
+    }
+
+    /// <summary>后台预热：错峰逐个创建 Tab 控件并导航（隐藏状态加载），
+    /// 用户点击时页面已就绪 —— 消除"首次点击白屏/黑屏数秒"的卡顿。</summary>
+    public async Task WarmupAllAsync(System.Windows.Forms.Control host)
+    {
+        foreach (var t in _tabs.ToList())
+        {
+            if (t.View != null) continue;
+            try
+            {
+                await EnsureTabAsync(t.Id, host);
+                await Task.Delay(2500); // 错峰：让上一个页面先完成关键渲染
+            }
+            catch { /* 单个失败不影响其余（懒加载兜底仍可用） */ }
+        }
     }
 
     /// <summary>兼容旧急切创建路径（smoke 模式用）。</summary>
