@@ -20,7 +20,7 @@ function Info($msg) { Write-Host "  ..    $msg" -ForegroundColor DarkGray }
 
 Add-Type -AssemblyName System.Windows.Forms
 
-Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Windows.Forms @"
+Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Runtime,System.Runtime.InteropServices,System.Windows.Forms @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -266,7 +266,7 @@ if ($btn) {
 # ---------- 10. --restore 兜底 ----------
 Info "人为制造孤儿态（脏标志 true + 任务栏隐藏）……"
 Set-Content -Path $stateFile -Value '{"focus_mode_active": true}' -Encoding UTF8
-Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Windows.Forms @"
+Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Runtime,System.Runtime.InteropServices,System.Windows.Forms @"
 using System; using System.Runtime.InteropServices;
 public static class TBHide {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);

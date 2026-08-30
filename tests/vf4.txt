@@ -1,0 +1,50 @@
+Add-Type : c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(41) : 类型“System.ComponentModel.Component”在未被引用的程序集
+中定义。必须添加对程序集“System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d
+50a3a”的引用。
+c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(40) :         try {
+c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(41) : >>>             var p = System.Diagnostics.Process.GetProcessById((
+int)pid);
+c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(42) :             return p.ProcessName + ":" + pid;
+所在位置 D:\focus-desktop\tests\verify-step12.ps1:23 字符: 1
++ Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Wind ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (Microsoft.Power...peCompilerError:AddTypeCompilerError) [Add-Type]，Excepti
+    on
+    + FullyQualifiedErrorId : SOURCE_CODE_ERROR,Microsoft.PowerShell.Commands.AddTypeCommand
+ 
+Add-Type : c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(41) : 类型“System.IDisposable”在未被引用的程序集中定义。必须添
+加对程序集“System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a”的引用。
+c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(40) :         try {
+c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(41) : >>>             var p = System.Diagnostics.Process.GetProcessById((
+int)pid);
+c:\Users\LCS\AppData\Local\Temp\upvsczmb.0.cs(42) :             return p.ProcessName + ":" + pid;
+所在位置 D:\focus-desktop\tests\verify-step12.ps1:23 字符: 1
++ Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Wind ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (Microsoft.Power...peCompilerError:AddTypeCompilerError) [Add-Type]，Excepti
+    on
+    + FullyQualifiedErrorId : SOURCE_CODE_ERROR,Microsoft.PowerShell.Commands.AddTypeCommand
+ 
+Add-Type : 无法添加类型。出现编译错误。
+所在位置 D:\focus-desktop\tests\verify-step12.ps1:23 字符: 1
++ Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Wind ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Add-Type]，InvalidOperationException
+    + FullyQualifiedErrorId : COMPILER_ERRORS,Microsoft.PowerShell.Commands.AddTypeCommand
+ 
+
+=== focus-desktop 停点① 自动验收 ===
+  ..    前置：清理残留实例
+  ..    启动 focus-desktop（真实锁定模式）……
+  ..    finally：清理测试现场（恢复任务栏 + 杀残留进程）
+找不到类型 [Win32Probe]。
+所在位置 D:\focus-desktop\tests\verify-step12.ps1:133 字符: 11
++     $fw = [Win32Probe]::FindFocusWindow()
++           ~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (Win32Probe:TypeName) []，RuntimeException
+    + FullyQualifiedErrorId : TypeNotFound
+ 
+
+===== 汇总 =====
+
+通过 0 / 0 项

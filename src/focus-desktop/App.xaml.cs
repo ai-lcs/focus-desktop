@@ -37,6 +37,24 @@ public partial class App : Application
             return;
         }
 
+        // --voltest：音量 COM 通道自测（无 UI，控制台输出即退）
+        if (e.Args.Contains("--voltest"))
+        {
+            VolumeHelper.Init();
+            Console.WriteLine($"IsReady: {VolumeHelper.IsReady}");
+            Console.WriteLine($"LastError: {VolumeHelper.LastError ?? "(none)"}");
+            var before = VolumeHelper.Get();
+            VolumeHelper.Set(before >= 50 ? 30 : 70);
+            System.Threading.Thread.Sleep(300);
+            var after = VolumeHelper.Get();
+            Console.WriteLine($"Get before={before} -> Set -> Get after={after}");
+            Console.WriteLine(after == (before >= 50 ? 30 : 70) ? "VOLTEST PASS" : "VOLTEST FAIL");
+            Console.WriteLine($"Mute: {VolumeHelper.IsMuted()}");
+            Shutdown();
+            Environment.Exit(after == (before >= 50 ? 30 : 70) ? 0 : 1);
+            return;
+        }
+
         // --restore：纯恢复模式。不进 UI，恢复完就退。
         if (_options.Restore)
         {
