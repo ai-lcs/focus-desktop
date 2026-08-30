@@ -31,18 +31,21 @@ public class PomodoroControl : System.Windows.Controls.UserControl
     private readonly DispatcherTimer _uiTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
     // 环形画布 200px；ClipToBounds 防任何绘制异常溢出卡片
-    private readonly Canvas _ringCanvas = new() { Width = 200, Height = 200, ClipToBounds = true };
+    private readonly Canvas _ringCanvas = new() { Width = 230, Height = 230, ClipToBounds = true };
     private System.Windows.Shapes.Path? _arcPath; // 独立引用管理弧（绝不按索引删子元素）
 
     private readonly TextBlock _timeText = new()
     {
-        FontSize = 34, FontWeight = FontWeights.Light,
+        FontSize = 38, FontWeight = FontWeights.Light,
         FontFamily = new System.Windows.Media.FontFamily("Consolas"),
-        Foreground = White, TextAlignment = TextAlignment.Center, Width = 200,
+        Foreground = White, TextAlignment = TextAlignment.Center, Width = 230,
     };
     private readonly Dictionary<int, Button> _modeBtns = new();
     private Button _btnStart = null!, _btnPause = null!, _btnReset = null!;
+    private Button _hardToggle = null!;
     private bool _lastFinished; // 完成蜂鸣只响一次
+    /// <summary>预览模式（硬性专注仅演示不禁真锁）。</summary>
+    private bool _previewMode;
 
     public PomodoroControl()
     {
@@ -60,7 +63,13 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         Redraw();
     });
 
-    private void OnSvcPhaseChanged() => Dispatcher.Invoke(Redraw);
+    private void OnSvcPhaseChanged() => Dispatcher.Invoke(() =>
+    {
+        // 硬性专注唯一出口：专注段跑完进入休息
+        if (HardFocus.Active && _svc.CurrentPhase is PomodoroService.Phase.ShortBreak or PomodoroService.Phase.LongBreak)
+            HardFocus.Release();
+        Redraw();
+    });
 
     public void LoadConfig(AppSettings cfg)
     {
@@ -73,7 +82,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
     private void BuildUi()
     {
         Background = Brushes.Transparent;
-        Width = 320;
+        Width = 360;
 
         var root = new StackPanel();
 
@@ -81,23 +90,41 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         var titleRow = new Grid();
         titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new TextBlock { Text = "番茄钟", FontSize = 13, Foreground = Muted };
+        var title = new TextBlock { Text = "番茄钟", FontSize = 13, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(title, 0);
-        var hint = new TextBlock { Text = "专注后自动休息 · 每 4 轮长休", FontSize = 11, Foreground = new SolidColorBrush(SwmColor.FromRgb(0x6B, 0x70, 0x76)) };
-        Grid.SetColumn(hint, 1);
+
+        // 右侧组合：提示 + 硬性专注开关
+        var rightSp = new StackPanel { Orientation = Orientation.Horizontal };
+        var hint = new TextBlock { Text = "专注后自动休息 · 每 4 轮长休", FontSize = 11, Foreground = new SolidColorBrush(SwmColor.FromRgb(0x6B, 0x70, 0x76)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+        rightSp.Children.Add(hint);
+
+        _hardToggle = new Button
+        {
+            Content = "硬性专注 关",
+            FontSize = 11,
+            Padding = new Thickness(10, 3, 10, 3),
+            Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A)),
+            Foreground = new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF)),
+            BorderThickness = new Thickness(0),
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+        System.Windows.Automation.AutomationProperties.SetAutomationId(_hardToggle, "HardFocusToggle");
+        _hardToggle.Click += (_, _) => ToggleHardFocus();
+        rightSp.Children.Add(_hardToggle);
+        Grid.SetColumn(rightSp, 1);
         titleRow.Children.Add(title);
-        titleRow.Children.Add(hint);
+        titleRow.Children.Add(rightSp);
         root.Children.Add(titleRow);
 
         // 环形进度：轨道 12px；环内只有倒计时（用户指示）
         _ringCanvas.HorizontalAlignment = HorizontalAlignment.Center;
-        _ringCanvas.Margin = new Thickness(0, 14, 0, 10);
+        _ringCanvas.Margin = new Thickness(0, 6, 0, 6);
 
-        var track = new Ellipse { Stroke = Track, StrokeThickness = 12, Width = 168, Height = 168 };
-        Canvas.SetLeft(track, 16); Canvas.SetTop(track, 16);
+        var track = new Ellipse { Stroke = Track, StrokeThickness = 13, Width = 194, Height = 194 };
+        Canvas.SetLeft(track, 18); Canvas.SetTop(track, 18);
         _ringCanvas.Children.Add(track);
 
-        Canvas.SetLeft(_timeText, 0); Canvas.SetTop(_timeText, 76);
+        Canvas.SetLeft(_timeText, 0); Canvas.SetTop(_timeText, 86);
         _ringCanvas.Children.Add(_timeText);
 
         root.Children.Add(_ringCanvas);
@@ -168,6 +195,25 @@ public class PomodoroControl : System.Windows.Controls.UserControl
 
     private void Start() { _svc.Start(); Redraw(); }
 
+    /// <summary>硬性专注开关：开启后退出验证禁用输入+重置禁用+自锁；
+    /// 唯一出口=当前专注段跑完（OnPhaseChanged 到休息时 Release）。</summary>
+    private void ToggleHardFocus()
+    {
+        if (HardFocus.Active)
+        {
+            // 已开启：自锁，不给关（提示出口）
+            _hardToggle.Content = "硬性专注 开·专注段结束解除";
+            return;
+        }
+        // 开启必须伴随一个专注段（Idle 时先启动）
+        if (_svc.CurrentPhase == PomodoroService.Phase.Idle)
+            _svc.Start();
+        HardFocus.Enable(!_previewMode);
+        Redraw();
+    }
+
+    public void SetPreviewMode(bool preview) => _previewMode = preview;
+
     private void Pause()
     {
         if (_svc.IsRunning) _svc.Pause(); else if (_svc.CurrentPhase != PomodoroService.Phase.Idle) _svc.Resume();
@@ -194,6 +240,23 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _btnPause.Content = running ? "暂停" : "继续";
         _btnPause.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
         _btnReset.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
+        // 硬性专注：重置禁用（防逃避）
+        if (HardFocus.Active)
+        {
+            _btnReset.IsEnabled = false;
+            _btnReset.Opacity = 0.45;
+            _hardToggle.Content = "硬性专注 开";
+            _hardToggle.Background = Gold;
+            _hardToggle.Foreground = Brushes.Black;
+        }
+        else
+        {
+            _btnReset.IsEnabled = true;
+            _btnReset.Opacity = 1;
+            _hardToggle.Content = "硬性专注 关";
+            _hardToggle.Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A));
+            _hardToggle.Foreground = new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF));
+        }
         StyleModeButtons();
         StyleActionButtons();
 
@@ -233,7 +296,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
             : _svc.CurrentPhase == PomodoroService.Phase.Work ? TealHover
             : Gold;
 
-        var cx = 100.0; var cy = 100.0; var R = 84.0;
+        var cx = 115.0; var cy = 115.0; var R = 97.0;
 
         if (ratio > 0.985)
         {
@@ -257,7 +320,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         var arc = new Path
         {
             Stroke = color,
-            StrokeThickness = 12,
+            StrokeThickness = 13,
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round,
             Data = new PathGeometry

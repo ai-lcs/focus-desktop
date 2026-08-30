@@ -82,6 +82,7 @@ public partial class MainWindow : Window
         FocusQuote.Text = cfg.FocusQuote;
 
         // 番茄钟（桌面版设计控件，自带环形进度/模式按钮/蜂鸣）
+        PomoControl.SetPreviewMode(options.Preview || options.Dev);
         PomoControl.LoadConfig(cfg);
 
         // 时钟：顶栏小钟 + 首页大钟
@@ -90,11 +91,13 @@ public partial class MainWindow : Window
             var now = DateTime.Now;
             BigClock.Text = now.ToString("HH:mm");
             ClockDate.Text = now.ToString("M月d日 dddd");
+            TopClock.Text = now.ToString("HH:mm");
         };
         _clock.Start();
         var n = DateTime.Now;
         BigClock.Text = n.ToString("HH:mm");
         ClockDate.Text = n.ToString("M月d日 dddd");
+        TopClock.Text = n.ToString("HH:mm");
 
         // 自由计时器 tick
         _timer.Tick += (_, _) =>
@@ -149,7 +152,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            await Task.Delay(3000);
+            await Task.Delay(1500); // 尽早开始（用户 5-7 秒就会开始点 Tab）
             if (_web != null && _hostPanel != null)
                 await _web.WarmupAllAsync(_hostPanel);
         }
@@ -175,9 +178,9 @@ public partial class MainWindow : Window
                 WfHost.Child = _hostPanel;
 
                 // smoke 仍全量急切创建（高危路径必须被测）
-                _web.RegisterTab("bili", "Bilibili", "https://www.bilibili.com");
-                _web.RegisterTab("chatgpt", "ChatGPT", "https://chatgpt.com");
-                _web.RegisterTab("gemini", "Gemini", "https://aistudio.google.com");
+                _web.RegisterTab("bili", "哔哩哔哩", "https://www.bilibili.com");
+                _web.RegisterTab("chatgpt", "Chat GPT", "https://chatgpt.com");
+                _web.RegisterTab("gemini", "AI Studio", "https://aistudio.google.com");
                 _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
                 foreach (var tab in _web.Tabs.ToList())
                     await _web.EnsureTabAsync(tab.Id, _hostPanel);
@@ -225,9 +228,9 @@ public partial class MainWindow : Window
             _hostPanel = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Fill };
             WfHost.Child = _hostPanel;
 
-            _web.RegisterTab("bili", "Bilibili", "https://www.bilibili.com");
-            _web.RegisterTab("chatgpt", "ChatGPT", "https://chatgpt.com");
-            _web.RegisterTab("gemini", "Gemini", "https://aistudio.google.com");
+            _web.RegisterTab("bili", "哔哩哔哩", "https://www.bilibili.com");
+            _web.RegisterTab("chatgpt", "Chat GPT", "https://chatgpt.com");
+            _web.RegisterTab("gemini", "AI Studio", "https://aistudio.google.com");
             _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
 
             BuildTabBar();
@@ -331,7 +334,7 @@ public partial class MainWindow : Window
                 Cursor = System.Windows.Input.Cursors.Hand,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            close.Click += (_, _) => CloseTabById(id);
+            close.Click += (_, e) => { e.Handled = true; CloseTabById(id); }; // 阻止冒泡到外层Tab按钮（否则关闭后跳走/白屏）
             sp.Children.Add(close);
         }
 
@@ -405,9 +408,9 @@ public partial class MainWindow : Window
     /// <summary>四站快捷定义（"+"菜单与快捷入口共用）。</summary>
     private static readonly (string Id, string Title, string Url)[] QuickSites =
     {
-        ("bili", "Bilibili", "https://www.bilibili.com"),
-        ("chatgpt", "ChatGPT", "https://chatgpt.com"),
-        ("gemini", "Gemini", "https://aistudio.google.com"),
+        ("bili", "哔哩哔哩", "https://www.bilibili.com"),
+        ("chatgpt", "Chat GPT", "https://chatgpt.com"),
+        ("gemini", "AI Studio", "https://aistudio.google.com"),
         ("deepseek", "DeepSeek", "https://chat.deepseek.com"),
     };
 
@@ -526,16 +529,24 @@ public partial class MainWindow : Window
     private async void ActivateTab(string id)
     {
         _activeTab = id;
+
+        // 死 id 兜底（如冒泡点击已关闭的 Tab）：回首页，绝不留空白屏
+        var isWeb = _web != null && _web.Tabs.Any(t => t.Id == id);
+        if (!isWeb && id is not "home" and not "files")
+        {
+            ActivateTab("home");
+            return;
+        }
         ApplyTabVisibility(id);
 
         // 懒加载：首次激活才真正创建 WebView2 控件。
-        // await 期间用户可能又点了别的 Tab —— 完成后重断言，谁最后点谁生效（竞态防御）。
-        var isWeb = _web != null && _web.Tabs.Any(t => t.Id == id);
+        // 创建等待期先隐藏全部网页控件（否则旧页面挂着 = Tab/内容不一致的"卡住"观感）。
         if (isWeb && _web != null && _hostPanel != null)
         {
             var info = _web.Tabs.First(t => t.Id == id);
             if (info.View == null)
             {
+                _web.Activate(null); // 立即隐藏所有网页控件，杜绝旧内容残留
                 if (_tabButtons.TryGetValue(id, out var btn0) && btn0.Content is Border b0
                     && b0.Child is System.Windows.Controls.Grid g0 && g0.Children[0] is StackPanel s0
                     && s0.Children[0] is TextBlock t0)
@@ -547,7 +558,10 @@ public partial class MainWindow : Window
                     CrashReporter.Write(ex, $"lazy-tab-{id}");
                 }
                 if (_activeTab != id) return; // 已切走：不动可见性（另一次 ActivateTab 负责最终状态）
-                OnTabTitleChanged(id, _web.Tabs.First(t => t.Id == id).Title); // 恢复标题
+                if (_tabButtons.TryGetValue(id, out var btn1) && btn1.Content is Border b1
+                    && b1.Child is System.Windows.Controls.Grid g1 && g1.Children[0] is StackPanel s1
+                    && s1.Children[0] is TextBlock t1)
+                    t1.Text = _web.Tabs.First(t => t.Id == id).Title; // 恢复标题
             }
         }
 
@@ -872,7 +886,7 @@ public partial class MainWindow : Window
         }
         // 正式模式：独立置顶窗口验证退出语
         var cfg = AppSettings.LoadOrDefault();
-        var dlg = new ExitWindow(cfg.ExitPhrase) { Owner = this };
+        var dlg = new ExitWindow(cfg.ExitPhrase, _options.Preview || _options.Dev) { Owner = this };
         if (dlg.ShowDialog() == true)
         {
             _focus.Exit();

@@ -1,0 +1,13 @@
+﻿PASS  启动：主窗口出现
+PASS  全屏铺满主屏 (1280 x 800，屏幕 1280x800)
+PASS  任务栏隐藏
+PASS  Win 键被拦（开始菜单未弹出）
+PASS  Alt+Tab 被拦（前台未切换: focus-desktop:30168）
+PASS  Alt+F4 被拦（进程存活）
+PASS  强杀后脏标志残留 true（自愈依据）
+PASS  启动自愈触发（self-heal 日志存在）
+PASS  干净退出（UIA 点击退出 → 进程退出）
+PASS  退出后任务栏恢复
+PASS  退出后脏标志清除
+PASS  --restore 后任务栏恢复
+PASS  --restore 后脏标志清除

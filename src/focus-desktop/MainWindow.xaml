@@ -86,6 +86,9 @@
                             Foreground="{DynamicResource DangerBrush}"
                             BorderBrush="{DynamicResource DangerBrush}" BorderThickness="1"
                             Cursor="Hand" Click="ExitButton_Click"/>
+                    <TextBlock x:Name="TopClock" Text="--:--" FontSize="14" FontFamily="Consolas"
+                               VerticalAlignment="Center" Margin="14,0,0,0"
+                               Foreground="{DynamicResource FgBrush}"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -114,14 +117,15 @@
                                    FontSize="18" FontWeight="Medium" HorizontalAlignment="Center" TextWrapping="Wrap"
                                    Foreground="#F5C542" TextAlignment="Center" LineHeight="30"/>
                     </Border>
-                    <!-- 快捷入口 -->
+                    <!-- 快捷入口：网页四站一行，学习文件独立第二行居中（用户 2026-08-30 指示） -->
                     <WrapPanel HorizontalAlignment="Center">
-                        <Button Style="{StaticResource NavBtn}" Content="📂 学习文件" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Files_Click"/>
                         <Button Style="{StaticResource NavBtn}" Content="📺 Bilibili" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Bili_Click"/>
                         <Button Style="{StaticResource NavBtn}" Content="💬 ChatGPT" FontSize="14" Padding="18,10" Margin="4" Click="Nav_ChatGPT_Click"/>
                         <Button Style="{StaticResource NavBtn}" Content="✦ Gemini" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Gemini_Click"/>
                         <Button Style="{StaticResource NavBtn}" Content="◈ DeepSeek" FontSize="14" Padding="18,10" Margin="4" Click="Nav_DeepSeek_Click"/>
                     </WrapPanel>
+                    <Button Style="{StaticResource NavBtn}" Content="📂 学习文件" FontSize="14" Padding="30,10"
+                            HorizontalAlignment="Center" Margin="0,10,0,0" Click="Nav_Files_Click"/>
                 </StackPanel>
 
                 <!-- 右列：计时器卡片 + 番茄钟卡片（拉伸铺满列高，修右下空洞） -->
@@ -141,7 +145,7 @@
                                 <TextBlock x:Name="TimerHint" Text="空格 开始/暂停" FontSize="11"
                                            Foreground="#6B7076" HorizontalAlignment="Right"/>
                             </Grid>
-                            <TextBlock x:Name="TimerBig" Text="00:00:00" FontSize="40" FontWeight="Light"
+                            <TextBlock x:Name="TimerBig" Text="00:00:00" FontSize="46" FontWeight="Light"
                                        FontFamily="Consolas" HorizontalAlignment="Center" Foreground="#F0F4FF"/>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,0">
                                 <Button x:Name="TimerBtnToggle" Content="开始" Style="{StaticResource NavBtn}"
@@ -152,11 +156,11 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 卡片2：番茄钟（占满剩余高度，内容垂直居中） -->
+                    <!-- 卡片2：番茄钟（占满剩余高度，内容垂直居中；padding 收紧防环-框大空位） -->
                     <Border Grid.Row="1" Background="{StaticResource CardBg}" CornerRadius="14"
                             BorderBrush="#4A505A" BorderThickness="1"
-                            Padding="24,14">
-                        <local:PomodoroControl x:Name="PomoControl" VerticalAlignment="Center"/>
+                            Padding="10,8">
+                        <local:PomodoroControl x:Name="PomoControl" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                     </Border>
                 </Grid>
             </Grid>

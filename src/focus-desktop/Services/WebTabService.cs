@@ -116,12 +116,6 @@ public sealed class WebTabService : IDisposable
         }
     }
 
-    /// <summary>兼容旧急切创建路径（smoke 模式用）。</summary>
-    public async Task<TabInfo> CreateTabAsync(string id, string title, string initialUrl, System.Windows.Forms.Control host)
-    {
-        RegisterTab(id, title, initialUrl);
-        return await EnsureTabAsync(id, host);
-    }
 
     public bool CloseTab(string id)
     {
@@ -201,7 +195,10 @@ public sealed class WebTabService : IDisposable
         view.CoreWebView2.DocumentTitleChanged += (s, e) =>
         {
             var t = view.CoreWebView2.DocumentTitle;
-            TitleChanged?.Invoke(id, string.IsNullOrEmpty(t) ? title : $"{title} · {t}");
+            if (string.IsNullOrEmpty(t)) { TitleChanged?.Invoke(id, title); return; }
+            // 页面标题限长 12 字符（B站首页标题很长会把 Tab 挤爆——视觉审查发现）
+            var page = t.Length > 12 ? t[..12] + "…" : t;
+            TitleChanged?.Invoke(id, $"{title} · {page}");
         };
     }
 

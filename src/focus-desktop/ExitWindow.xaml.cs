@@ -24,10 +24,27 @@ public partial class ExitWindow : Window
         _expected = "";
     }
 
-    public ExitWindow(string phrase) : this()
+    private readonly bool _previewMode;
+
+    public ExitWindow(string phrase, bool previewMode = false) : this()
     {
+        _previewMode = previewMode;
         _expected = phrase.Trim();
         PhraseText.Text = phrase;
+
+        // 硬性专注：输入框禁用（退出按钮可点但永远无法通过验证）。
+        // 预览模式不禁用（预览随时可退），只提示。
+        if (HardFocus.BlocksExitInput(previewMode))
+        {
+            InputBox.IsEnabled = false;
+            ErrorText.Text = "硬性专注已开启：完成当前专注段后自动解除。";
+            ErrorText.Foreground = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xF0, 0xB4, 0x29));
+        }
+        else if (HardFocus.Active)
+        {
+            ErrorText.Text = "（预览模式：硬性专注仅演示，不阻止退出）";
+        }
         WindowStartupLocation = WindowStartupLocation.Manual;
         // 构造时即用已知尺寸逻辑居中（SizeToContent+CenterScreen 在 DPI 200% 下曾把弹窗
         // 顶出屏幕外，确认按钮点不到——2026-08-30 事故；固定尺寸让计算可预期）
