@@ -11,5 +11,29 @@
         <SolidColorBrush x:Key="AccentBrush" Color="#8AB4F8"/>
         <SolidColorBrush x:Key="DangerBrush" Color="#F28B82"/>
         <SolidColorBrush x:Key="BorderBrush" Color="#3C4043"/>
+        <SolidColorBrush x:Key="AccentSoft" Color="#1F2A3C"/>
+
+        <!-- 按钮通用样式（应用级：MainWindow 和 ExitWindow 共用） -->
+        <Style x:Key="NavBtn" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource FgBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="22,12"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Application.Resources>
 </Application>

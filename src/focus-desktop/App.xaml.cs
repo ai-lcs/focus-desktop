@@ -75,14 +75,14 @@ public partial class App : Application
 
         main.Show();
 
-        // 锁定策略：--smoke 永不锁；首次运行（无 config.json）进 Setup 模式（不锁，
-        // 让用户自由登录各站/确认设置，spec §9）；此后每次启动直接锁定
-        if (!_options.Dev && !_options.Smoke && !FirstRunSetup.IsSetupComplete())
+        // 锁定策略：--smoke 永不锁；--preview 预览模式（不锁+普通窗口+直接退出，给用户调配置用）；
+        // 首次运行（无 setup_done）进 Setup 模式（不锁，自由登录）；此后每次启动直接锁定
+        if (!_options.Dev && !_options.Smoke && !_options.Preview && !FirstRunSetup.IsSetupComplete())
         {
             FirstRunSetup.EnterSetupMode();
             App.SmokeLog("first-run setup mode (no lock)");
         }
-        else if (!_options.Dev && !_options.Smoke)
+        else if (!_options.Dev && !_options.Smoke && !_options.Preview)
         {
             _focus.Enter(); // 真实模式：进锁定
         }
@@ -135,10 +135,11 @@ public partial class App : Application
 }
 
 /// <summary>命令行参数。</summary>
-public sealed record AppOptions(bool Dev, bool Restore, bool Smoke)
+public sealed record AppOptions(bool Dev, bool Restore, bool Smoke, bool Preview)
 {
     public static AppOptions Parse(string[] args) =>
         new(args.Contains("--dev", StringComparer.OrdinalIgnoreCase),
             args.Contains("--restore", StringComparer.OrdinalIgnoreCase),
-            args.Contains("--smoke", StringComparer.OrdinalIgnoreCase));
+            args.Contains("--smoke", StringComparer.OrdinalIgnoreCase),
+            args.Contains("--preview", StringComparer.OrdinalIgnoreCase));
 }

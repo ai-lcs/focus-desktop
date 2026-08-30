@@ -71,7 +71,7 @@
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border x:Name="DevBadge" Background="#5F5B00" CornerRadius="4" Padding="8,2" Margin="0,0,12,0"
                             Visibility="Collapsed">
-                        <TextBlock Text="DEV" FontSize="12" FontWeight="Bold" Foreground="#FDD663"/>
+                        <TextBlock x:Name="DevBadgeText" Text="DEV" FontSize="12" FontWeight="Bold" Foreground="#FDD663"/>
                     </Border>
                     <Button x:Name="ExitButton" Content="退出"
                             FontSize="13" Padding="14,5"
@@ -110,18 +110,25 @@
                 <Grid Grid.Row="0" Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <Button Content="← 返回" Grid.Column="0" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13"
                             Click="Files_Back_Click"/>
-                    <TextBox x:Name="SearchBox" Grid.Column="1" Margin="16,0" FontSize="14" Padding="8,6"
+                    <Button Content="🏠 根目录" Grid.Column="1" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13" Margin="8,0,0,0"
+                            Click="Files_Root_Click"/>
+                    <TextBlock x:Name="FilesPath" Grid.Column="2" Text="D:\Study" FontSize="13" FontFamily="Consolas"
+                               VerticalAlignment="Center" Margin="14,0"
+                               Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+                    <TextBox x:Name="SearchBox" Grid.Column="3" Width="200" FontSize="14" Padding="8,6"
                              VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged"
                              Background="{DynamicResource PanelBrush}"
                              Foreground="{DynamicResource FgBrush}"
                              BorderBrush="{DynamicResource BorderBrush}"/>
-                    <Button Content="🏠 根目录" Grid.Column="2" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13"
-                            Click="Files_Root_Click"/>
+                    <Button Content="📁 选择文件夹" Grid.Column="4" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13" Margin="8,0,0,0"
+                            Click="Files_Choose_Click"/>
                 </Grid>
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <ItemsControl x:Name="FileList"/>
@@ -140,33 +147,5 @@
                 Padding="16,8" Margin="0,12,0,0" Visibility="Collapsed">
             <TextBlock x:Name="BlockedText" Text="" FontSize="13" Foreground="#FAD2CF"/>
         </Border>
-
-        <!-- 退出验证弹窗（Step 6） -->
-        <Grid x:Name="ExitDialog" Visibility="Collapsed" Background="#CC000000">
-            <Border VerticalAlignment="Center" HorizontalAlignment="Center"
-                    Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}"
-                    BorderThickness="1" CornerRadius="12" Padding="32" Width="520">
-                <StackPanel>
-                    <TextBlock Text="确认离开专注环境" FontSize="20" FontWeight="Bold" Margin="0,0,0,8"/>
-                    <TextBlock Text="请完整输入以下句子以退出：" FontSize="14" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12"/>
-                    <Border Background="{DynamicResource BgBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-                        <TextBlock x:Name="ExitPhraseText" Text="" FontSize="15" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource AccentBrush}"/>
-                    </Border>
-                    <TextBox x:Name="ExitInput" FontSize="15" Padding="10,8" KeyDown="ExitInput_KeyDown"
-                             Background="{DynamicResource BgBrush}"
-                             Foreground="{DynamicResource FgBrush}"
-                             BorderBrush="{DynamicResource BorderBrush}"/>
-                    <TextBlock x:Name="ExitError" Text="" FontSize="12" Foreground="{DynamicResource DangerBrush}" Margin="0,8,0,0"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-                        <Button Content="留在这里" Style="{StaticResource NavBtn}" Padding="16,8" FontSize="13" Margin="0,0,10,0"
-                                Click="ExitCancel_Click"/>
-                        <Button Content="确认退出" Style="{StaticResource NavBtn}" Padding="16,8" FontSize="13"
-                                Background="#5C1F1F" BorderBrush="#E5534B"
-                                Click="ExitConfirm_Click"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-        </Grid>
     </Grid>
 </Window>

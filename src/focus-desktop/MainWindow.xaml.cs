@@ -50,11 +50,23 @@ public partial class MainWindow : Window
         Top = 0;
         Width = SystemParameters.PrimaryScreenWidth;
         Height = SystemParameters.PrimaryScreenHeight;
-        Topmost = true;
+        // 预览模式：普通可切换窗口（不置顶、不覆盖全屏体验），给用户调配置用
+        if (options.Preview)
+        {
+            Topmost = false;
+            Width = Math.Min(1280, SystemParameters.PrimaryScreenWidth - 80);
+            Height = Math.Min(800, SystemParameters.PrimaryScreenHeight - 80);
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+        else
+        {
+            Topmost = true;
+        }
 
-        if (options.Dev)
+        if (options.Dev || options.Preview)
         {
             DevBadge.Visibility = Visibility.Visible;
+            DevBadgeText.Text = options.Preview ? "预览" : "DEV";
         }
 
         _clock.Tick += (_, _) => ClockText.Text = DateTime.Now.ToString("HH:mm:ss");
@@ -219,7 +231,11 @@ public partial class MainWindow : Window
 
     // ---------------- 导航 ----------------
 
-    private void Nav_Files_Click(object sender, RoutedEventArgs e) => ActivateTab("files");
+    private void Nav_Files_Click(object sender, RoutedEventArgs e)
+    {
+        ActivateTab("files");
+        RenderFiles(); // 进入即渲染（旧版漏了这行 → 首次进入永远空白）
+    }
     private void Nav_Bili_Click(object sender, RoutedEventArgs e) => ActivateTab("bili");
     private void Nav_ChatGPT_Click(object sender, RoutedEventArgs e) => ActivateTab("chatgpt");
     private void Nav_Gemini_Click(object sender, RoutedEventArgs e) => ActivateTab("gemini");
@@ -234,6 +250,45 @@ public partial class MainWindow : Window
         if (parent != null && IsUnderRoot(parent)) { _currentDir = parent; RenderFiles(); }
     }
 
+    /// <summary>选择学习文件夹（系统目录选择对话框 → 写入 config.json 立即生效）。</summary>
+    private void Files_Choose_Click(object sender, RoutedEventArgs e)
+    {
+        using var dlg = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "选择学习文件夹（focus-desktop 只浏览这个目录）",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = true,
+        };
+        // 初始定位：当前配置目录存在则从它开始，否则从 D:\ 开始
+        try
+        {
+            if (Directory.Exists(_filesRoot))
+            {
+                dlg.InitialDirectory = _filesRoot;
+                dlg.SelectedPath = _filesRoot;
+            }
+            else
+            {
+                dlg.InitialDirectory = @"D:\";
+                dlg.SelectedPath = @"D:\";
+            }
+        }
+        catch { }
+
+        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK
+            && !string.IsNullOrWhiteSpace(dlg.SelectedPath))
+        {
+            // 写入配置 + 立即刷新文件页
+            var cfg = AppSettings.LoadOrDefault();
+            cfg.StudyFolder = dlg.SelectedPath;
+            cfg.Save();
+            _filesRoot = dlg.SelectedPath;
+            _currentDir = dlg.SelectedPath;
+            ShowBlocked($"学习文件夹已设为：{dlg.SelectedPath}");
+            RenderFiles();
+        }
+    }
+
     private bool IsUnderRoot(string dir)
     {
         var root = Path.GetFullPath(_filesRoot).TrimEnd('\\', '/');
@@ -246,6 +301,18 @@ public partial class MainWindow : Window
     private void RenderFiles()
     {
         FileList.Items.Clear();
+        FilesPath.Text = _currentDir; // 顶栏显示当前目录
+        if (!Directory.Exists(_filesRoot))
+        {
+            FileList.Items.Add(new TextBlock
+            {
+                Text = $"学习目录不存在：{_filesRoot}\n请点右上「选择文件夹」重新指定。",
+                Foreground = (Brush)FindResource("DangerBrush"),
+                FontSize = 14,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return;
+        }
         var keyword = SearchBox.Text.Trim();
         try
         {
@@ -342,49 +409,23 @@ public partial class MainWindow : Window
 
     private void ExitButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_options.Dev)
+        // 预览模式/开发模式：直接退出（给用户调整配置用，无摩擦）
+        if (_options.Dev || _options.Preview)
         {
             _focus.Exit();
             Application.Current.Shutdown();
             return;
         }
+        // 正式模式：独立置顶窗口验证退出语
+        // （旧版是主窗口内嵌 Grid 弹窗：Grid.Row 缺失被压进顶栏 + airspace 被网页盖住 →
+        //  2026-08-30 用户"退不出来"事故根因，改为独立 Window 一并解决两个问题）
         var cfg = AppSettings.LoadOrDefault();
-        ExitPhraseText.Text = cfg.ExitPhrase;
-        ExitInput.Text = "";
-        ExitError.Text = "";
-        ExitDialog.Visibility = Visibility.Visible;
-        ExitInput.Focus();
-    }
-
-    private void ExitConfirm_Click(object sender, RoutedEventArgs e)
-    {
-        var cfg = AppSettings.LoadOrDefault();
-        var input = ExitInput.Text.Trim();
-        if (input == cfg.ExitPhrase.Trim())
+        var dlg = new ExitWindow(cfg.ExitPhrase) { Owner = this };
+        if (dlg.ShowDialog() == true)
         {
-            ExitDialog.Visibility = Visibility.Collapsed;
             _focus.Exit();
             Application.Current.Shutdown();
         }
-        else
-        {
-            ExitError.Text = "输入不一致，请核对后重试";
-            ExitInput.SelectAll();
-        }
-    }
-
-    private void ExitInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-    {
-        if (e.Key == System.Windows.Input.Key.Enter)
-        {
-            e.Handled = true;
-            ExitConfirm_Click(sender, e);
-        }
-    }
-
-    private void ExitCancel_Click(object sender, RoutedEventArgs e)
-    {
-        ExitDialog.Visibility = Visibility.Collapsed;
     }
 
     // ---------------- 键盘：空格计时 / Esc ----------------
@@ -392,15 +433,6 @@ public partial class MainWindow : Window
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
-        if (ExitDialog.Visibility == Visibility.Visible)
-        {
-            if (e.Key == System.Windows.Input.Key.Escape)
-            {
-                ExitDialog.Visibility = Visibility.Collapsed;
-                e.Handled = true;
-            }
-            return; // 弹窗期间不处理快捷键
-        }
         if (e.Key == System.Windows.Input.Key.Space && HomeView.Visibility == Visibility.Visible)
         {
             e.Handled = true;

@@ -196,24 +196,29 @@ $btn = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond
 if ($btn) {
     $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $invoke.Invoke()
-    Start-Sleep -Milliseconds 1200
-    # 退出验证弹窗：读取 config.json 的退出语填入，再点"确认退出"
+    Start-Sleep -Milliseconds 1500
+    # 退出验证弹窗（独立 ExitWindow 顶层窗口）：从根元素找，读取 config.json 退出语填入再确认
     $cfgFile = Join-Path $DataDir "config.json"
     $phrase = (Get-Content $cfgFile -Raw | ConvertFrom-Json).exitPhrase
-    $inputCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty, "TextBox")
-    $inputBox = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $inputCond)
-    if ($inputBox) {
-        $vp = $inputBox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-        $vp.SetValue($phrase)
-        Start-Sleep -Milliseconds 400
-        $okCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::NameProperty, "确认退出")
-        $okBtn = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $okCond)
-        if ($okBtn) {
-            ($okBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
-        } else { Fail "干净退出" "UIA 未找到确认退出按钮" }
-    } else { Fail "干净退出" "UIA 未找到输入框" }
+    $dlgCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty, "确认离开专注环境")
+    $dlg = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $dlgCond)
+    if ($dlg) {
+        $inputCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+        $inputBox = $dlg.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $inputCond)
+        if ($inputBox) {
+            $vp = $inputBox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+            $vp.SetValue($phrase)
+            Start-Sleep -Milliseconds 400
+            $okCond = New-Object System.Windows.Automation.PropertyCondition(
+                [System.Windows.Automation.AutomationElement]::NameProperty, "确认退出")
+            $okBtn = $dlg.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $okCond)
+            if ($okBtn) {
+                ($okBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+            } else { Fail "干净退出" "弹窗内未找到确认退出按钮" }
+        } else { Fail "干净退出" "弹窗内未找到输入框" }
+    } else { Fail "干净退出" "未找到退出弹窗窗口" }
     Start-Sleep -Milliseconds 2500
     if (-not (Get-Process "focus-desktop" -ErrorAction SilentlyContinue)) {
         Pass "干净退出（UIA 点击退出 → 进程退出）"
