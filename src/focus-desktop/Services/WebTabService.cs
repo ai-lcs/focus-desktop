@@ -172,8 +172,14 @@ public sealed class WebTabService : IDisposable
 
     public void Activate(string id)
     {
+        // 只动可见性需要变化的控件：反复 Show/Hide 全部控件会触发 WinForms 布局风暴
+        // （多 WebView2 控件时切 Tab 卡顿的直接原因）
         foreach (var t in _tabs)
-            if (t.View != null) t.View.Visible = t.Id == id;
+        {
+            if (t.View == null) continue;
+            var want = t.Id == id;
+            if (t.View.Visible != want) t.View.Visible = want;
+        }
     }
 
     public void Dispose()

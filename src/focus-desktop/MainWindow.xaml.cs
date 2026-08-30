@@ -375,23 +375,7 @@ public partial class MainWindow : Window
             }
         }
 
-        // "+" 新建 Tab（浏览器习惯：GPT 可开两个、网课可开三个）
-        var add = new WpfButton
-        {
-            Content = "+",
-            FontSize = 16,
-            Padding = new Thickness(10, 2, 10, 2),
-            Margin = new Thickness(6, 0, 0, 0),
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            Foreground = (Brush)FindResource("MutedBrush"),
-            Cursor = System.Windows.Input.Cursors.Hand,
-            Focusable = false,
-        };
-        System.Windows.Automation.AutomationProperties.SetAutomationId(add, "tab_add");
-        add.Click += (_, _) => ShowNewTabMenu();
-        TabBar.Children.Add(add);
-
+        // 注：「+」新建按钮已移至 XAML 固定位置（AddTabButton，不随 Tab 滚动）
         ActivateTab("home");
     }
 
@@ -558,6 +542,10 @@ public partial class MainWindow : Window
         FilesView.Visibility = id == "files" ? Visibility.Visible : Visibility.Collapsed;
         var isWeb = _web != null && _web.Tabs.Any(t => t.Id == id);
         WebHost.Visibility = isWeb ? Visibility.Visible : Visibility.Collapsed;
+
+        // 从 Tab 条进入文件页也必须渲染（v0.3.0 回归：BuildTabBar 的通用 Click 只切可见性，
+        // 不调 RenderFiles → 文件页永远空白 + 显示 XAML 默认 "D:\Study"）
+        if (id == "files") RenderFiles();
     }
 
     // ---------------- 导航（首页按钮也走 ActivateTab） ----------------

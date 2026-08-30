@@ -11,6 +11,7 @@ public static class UrlSelfTest
     public static int Run()
     {
         var cfg = new AppSettings();
+        cfg.StudyFolder = @"D:\杂文件\focus"; // file:// 学习目录子树用例的基准
         int pass = 0, fail = 0;
 
         void Check(string url, bool expected)
@@ -40,6 +41,9 @@ public static class UrlSelfTest
         Check("https://evil-bilibili.com/video/1", false);                 // 前缀仿冒域
         Check("https://bilibili.com.evil.io/video/1", false);              // 后缀仿冒域
         Check("https://notbilibili.com/", false);                          // 相似域
+        
+        // file:// 学习目录子树（PDF/图片/TXT 内置查看路径）—— v0.3.2 修复
+        Check("file:///D:/%E6%9D%82%E6%96%87%E4%BB%B6/focus/%E8%AE%B2%E4%B9%89.pdf", true);
         Check("file:///C:/Windows/system32/config", false);                // 本地文件协议
         Check("javascript:alert(1)", false);                               // JS 协议
         Check("https://taobao.com", false);                                // 购物

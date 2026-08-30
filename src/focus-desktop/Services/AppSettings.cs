@@ -11,7 +11,8 @@ namespace focus_desktop.Services;
 public class AppSettings
 {
     [JsonPropertyName("studyFolder")]
-    public string StudyFolder { get; set; } = @"D:\Study";
+    public string StudyFolder { get; set; } =
+        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "focus");
 
     [JsonPropertyName("exitPhrase")]
     public string ExitPhrase { get; set; } = "我发誓我确实有事需要离开这个环境，我要马上回来。";
