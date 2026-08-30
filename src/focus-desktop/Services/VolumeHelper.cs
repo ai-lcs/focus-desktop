@@ -43,6 +43,26 @@ public static class VolumeHelper
         catch { }
     }
 
+    public static bool IsMuted()
+    {
+        if (_vol == null) return false;
+        try { _vol.GetMute(out var m); return m; }
+        catch { return false; }
+    }
+
+    /// <summary>切换静音；返回切换后是否处于静音态。</summary>
+    public static bool ToggleMute()
+    {
+        if (_vol == null) return false;
+        try
+        {
+            _vol.GetMute(out var m);
+            _vol.SetMute(!m, IntPtr.Zero);
+            return !m;
+        }
+        catch { return false; }
+    }
+
     // ---- COM interop ----
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
     private class MMDeviceEnumerator { }

@@ -35,5 +35,61 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- 精细滑杆（音量）：4px 圆角轨道 + 10px 圆 Thumb + Accent 填充 -->
+        <Style x:Key="SlimSlider" TargetType="Slider">
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Background="Transparent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="PART_TrackBackground" Grid.ColumnSpan="2"
+                                    Height="4" CornerRadius="2" Background="#3A3F46"
+                                    VerticalAlignment="Center"/>
+                            <Track x:Name="PART_Track" Grid.ColumnSpan="2">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" Height="18"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" Height="18"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Width="11" Height="11"
+                                                         Fill="{DynamicResource AccentBrush}"
+                                                         Stroke="#202124" StrokeThickness="1.5"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                            <!-- 填充段（Decrease 区域显示 Accent 色） -->
+                            <Border x:Name="FillTrack" Height="4" CornerRadius="2" Width="0"
+                                    Background="{DynamicResource AccentBrush}"
+                                    VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Application.Resources>
 </Application>

@@ -39,6 +39,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
     {
         FontSize = 11, TextAlignment = TextAlignment.Center, Width = 150,
     };
+    private TextBlock _phaseLabel = null!;
     private readonly TextBlock _cycleText = new() { FontSize = 11, Foreground = Muted };
     private readonly Dictionary<int, Button> _modeBtns = new();
     private Button _btnStart = null!, _btnPause = null!, _btnReset = null!;
@@ -92,9 +93,12 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         Canvas.SetLeft(goldRing, 5); Canvas.SetTop(goldRing, 5);
         _ringCanvas.Children.Add(goldRing);
 
-        Canvas.SetLeft(_timeText, 0); Canvas.SetTop(_timeText, 54);
+        _phaseLabel = new TextBlock { FontSize = 13, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 150, Foreground = Muted };
+        Canvas.SetLeft(_phaseLabel, 0); Canvas.SetTop(_phaseLabel, 44);
+        _ringCanvas.Children.Add(_phaseLabel);
+        Canvas.SetLeft(_timeText, 0); Canvas.SetTop(_timeText, 62);
         _ringCanvas.Children.Add(_timeText);
-        Canvas.SetLeft(_statusText, 0); Canvas.SetTop(_statusText, 92);
+        Canvas.SetLeft(_statusText, 0); Canvas.SetTop(_statusText, 96);
         _ringCanvas.Children.Add(_statusText);
 
         root.Children.Add(_ringCanvas);
@@ -187,30 +191,36 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _timeText.Text = _svc.CurrentPhase == PomodoroService.Phase.Idle
             ? TimeSpan.FromMinutes(_svc.WorkMinutes).ToString(@"mm\:ss")
             : remain.ToString(@"mm\:ss");
-        _cycleText.Text = $"第 {_svc.CompletedCycles} 轮";
-
-        string status; Brush statusColor;
-        switch (_svc.CurrentPhase)
+        // 阶段标签（环内顶部）：Idle=番茄钟 / Work=专注 / Break=休息 —— 一眼看出在哪个阶段
+        var (phaseName, phaseBrush) = _svc.CurrentPhase switch
         {
-            case PomodoroService.Phase.Idle:
-                status = $"{_svc.WorkMinutes} 分钟专注模式"; statusColor = Muted; break;
-            case PomodoroService.Phase.Work when _svc.IsRunning:
-                status = "专注中"; statusColor = TealHover; break;
-            case PomodoroService.Phase.Work:
-                status = "已暂停"; statusColor = Blue; break;
-            case PomodoroService.Phase.ShortBreak when _svc.IsRunning:
-            case PomodoroService.Phase.LongBreak when _svc.IsRunning:
-                status = "休息中"; statusColor = Teal; break;
-            default:
-                status = "休息暂停"; statusColor = Blue; break;
-        }
-        _statusText.Text = _svc.CompletedCycles > 0 ? $"第 {_svc.CompletedCycles} 轮 · {status}" : status;
-        _statusText.Foreground = statusColor;
+            PomodoroService.Phase.Idle => ("番茄钟", Muted),
+            PomodoroService.Phase.Work => ("专注", TealHover),
+            _ => ("休息", Gold),
+        };
+        var paused = _svc.CurrentPhase != PomodoroService.Phase.Idle && !_svc.IsRunning;
+        _phaseLabel.Text = paused ? $"{phaseName}·已暂停" : phaseName;
+        _phaseLabel.Foreground = paused ? Blue : phaseBrush;
 
-        // 操作按钮文案/状态
-        _btnStart.Content = _svc.CurrentPhase == PomodoroService.Phase.Idle ? "开始" : (_svc.IsRunning ? "…" : "开始");
-        _btnStart.IsEnabled = !_svc.IsRunning;
-        _btnPause.Content = _svc.IsRunning ? "暂停" : "继续";
+        // 状态行（环内底部）：idle 显示规则脚注（自我解释），运行时显示轮数
+        string status;
+        if (_svc.CurrentPhase == PomodoroService.Phase.Idle)
+            status = $"{_svc.WorkMinutes} 分钟 · 每 {_svc.CyclesUntilLong} 轮长休 {_svc.LongBreakMinutes} 分";
+        else if (_svc.CompletedCycles > 0)
+            status = $"第 {_svc.CompletedCycles} 轮 · 下一步：{(_svc.CurrentPhase == PomodoroService.Phase.Work ? "休息" : "专注")}";
+        else
+            status = $"下一步：休息";
+        _statusText.Text = status;
+        _statusText.Foreground = paused ? Blue : Muted;
+
+        // 按钮状态机：Idle=[开始] Running=[暂停+重置] Paused=[继续+重置]
+        var idle = _svc.CurrentPhase == PomodoroService.Phase.Idle;
+        var running = _svc.IsRunning;
+        _btnStart.Content = idle ? "开始" : "…";
+        _btnStart.Visibility = idle ? Visibility.Visible : Visibility.Collapsed;
+        _btnPause.Content = running ? "暂停" : "继续";
+        _btnPause.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
+        _btnReset.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
         StyleModeButtons();
         StyleActionButtons();
 
@@ -243,9 +253,9 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         ratio = Math.Max(0, Math.Min(1.0, ratio));
         if (ratio <= 0) return;
 
-        var color = _svc.IsRunning
-            ? (_svc.CurrentPhase == PomodoroService.Phase.Work ? TealHover : Teal)
-            : Blue;
+        var color = !_svc.IsRunning ? Blue
+            : _svc.CurrentPhase == PomodoroService.Phase.Work ? TealHover
+            : Gold;
 
         var cx = 75.0; var cy = 75.0; var R = 62.0;
         var angle = -ratio * 360.0; // 顺时针（y 向下坐标系）
@@ -289,12 +299,26 @@ public class PomodoroControl : System.Windows.Controls.UserControl
 
     private void StyleActionButtons()
     {
-        _btnStart.Background = _btnStart.IsEnabled ? Teal : new SolidColorBrush(SwmColor.FromRgb(0x38, 0x38, 0x38));
-        _btnStart.Foreground = _btnStart.IsEnabled ? Brushes.Black : Muted;
-        _btnPause.Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A));
-        _btnPause.Foreground = _svc.IsRunning
-            ? White
-            : new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF));
+        // 主键（青绿高亮）：Idle=开始；Running=暂停变次键、无主键强调；Paused=继续当主键
+        var idle = _svc.CurrentPhase == PomodoroService.Phase.Idle;
+        var running = _svc.IsRunning;
+        _btnStart.Background = Teal;
+        _btnStart.Foreground = Brushes.Black;
+        if (idle)
+        {
+            _btnPause.Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A));
+            _btnPause.Foreground = White;
+        }
+        else if (running)
+        {
+            _btnPause.Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A));
+            _btnPause.Foreground = White;
+        }
+        else // paused → 继续是主键
+        {
+            _btnPause.Background = Teal;
+            _btnPause.Foreground = Brushes.Black;
+        }
         _btnReset.Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A));
         _btnReset.Foreground = new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF));
     }

@@ -9,14 +9,26 @@ namespace focus_desktop.Services;
 ///   → 所有 Tab 共享登录态，重启保持（spec §9）
 /// - 每个 Tab 一个 WebView2 控件，激活时 Show 其余 Hide
 /// - NavigationStarting 顶层白名单；NewWindowRequested 转内部 Tab；DownloadStarting 取消
+/// - 懒加载：RegisterTab 只登记元数据，EnsureTabAsync 首次激活才建控件
+/// - ProcessFailed 自愈：渲染进程崩溃 → 自动重建该 Tab；浏览器进程崩溃 → 全量重建
 /// </summary>
 public sealed class WebTabService : IDisposable
 {
     private CoreWebView2Environment? _env;
-    private readonly List<Tab> _tabs = new();
+    private readonly List<TabInfo> _tabs = new();
     private readonly string _profileDir;
 
-    public sealed record Tab(string Id, string Title, Microsoft.Web.WebView2.WinForms.WebView2 View);
+    /// <summary>Tab 元数据（懒加载：View 可能为 null 直到 EnsureTabAsync）。</summary>
+    public sealed record TabInfo(string Id, string Title, string InitialUrl,
+        Microsoft.Web.WebView2.WinForms.WebView2? View);
+
+    /// <summary>懒加载注册（不建控件）；返回可立即显示的 Tab。</summary>
+    public TabInfo RegisterTab(string id, string title, string initialUrl)
+    {
+        var info = new TabInfo(id, title, initialUrl, null);
+        _tabs.Add(info);
+        return info;
+    }
 
     public WebTabService()
     {
@@ -24,34 +36,91 @@ public sealed class WebTabService : IDisposable
         Directory.CreateDirectory(_profileDir);
     }
 
-    public IReadOnlyList<Tab> Tabs => _tabs;
+    public IReadOnlyList<TabInfo> Tabs => _tabs;
 
-    /// <summary>应用启动时调用一次（WPF 里 WebView2 控件创建在 UI 线程）。</summary>
+    /// <summary>WebView2 Runtime 缺失时抛带安装指引的异常（UI 层转友好卡片）。</summary>
     public async Task EnsureEnvironmentAsync()
     {
         if (_env != null) return;
-        _env = await CoreWebView2Environment.CreateAsync(null, _profileDir, null);
+        try
+        {
+            _env = await CoreWebView2Environment.CreateAsync(null, _profileDir, null);
+        }
+        catch (WebView2RuntimeNotFoundException ex)
+        {
+            throw new InvalidOperationException(
+                "未检测到 WebView2 运行时（Edge 内核）。请安装：https://developer.microsoft.com/microsoft-edge/webview2/", ex);
+        }
     }
 
-    public async Task<Tab> CreateTabAsync(string id, string title, string initialUrl, System.Windows.Forms.Control host)
+    /// <summary>首次激活/崩溃重建时调用：真正创建 WebView2 控件。</summary>
+    public async Task<TabInfo> EnsureTabAsync(string id, System.Windows.Forms.Control host)
     {
+        var idx = _tabs.FindIndex(t => t.Id == id);
+        if (idx < 0) throw new KeyNotFoundException($"tab {id} 未注册");
+        var info = _tabs[idx];
+        if (info.View != null) return info; // 已建
+
         if (_env == null) throw new InvalidOperationException("先调 EnsureEnvironmentAsync");
-        var view = new Microsoft.Web.WebView2.WinForms.WebView2
-        {
-            Dock = DockStyle.Fill,
-        };
+        var view = new Microsoft.Web.WebView2.WinForms.WebView2 { Dock = DockStyle.Fill };
         host.Controls.Add(view);
         await view.EnsureCoreWebView2Async(_env);
 
         var cfg = AppSettings.LoadOrDefault();
         WirePolicy(view, cfg);
-        WireTitleSync(id, title, view);
+        WireTitleSync(id, info.Title, view);
+        WireProcessFailed(view);
 
-        if (!string.IsNullOrEmpty(initialUrl))
-            view.CoreWebView2.Navigate(initialUrl);
-        _tabs.Add(new Tab(id, title, view));
-        return _tabs[^1];
+        if (!string.IsNullOrEmpty(info.InitialUrl))
+            view.CoreWebView2.Navigate(info.InitialUrl);
+        info = info with { View = view };
+        _tabs[idx] = info;
+        return info;
     }
+
+    /// <summary>兼容旧急切创建路径（smoke 模式用）。</summary>
+    public async Task<TabInfo> CreateTabAsync(string id, string title, string initialUrl, System.Windows.Forms.Control host)
+    {
+        RegisterTab(id, title, initialUrl);
+        return await EnsureTabAsync(id, host);
+    }
+
+    public bool CloseTab(string id)
+    {
+        var idx = _tabs.FindIndex(t => t.Id == id);
+        if (idx < 0) return false;
+        var info = _tabs[idx];
+        _tabs.RemoveAt(idx);
+        try { info.View?.Dispose(); } catch { }
+        return true;
+    }
+
+    /// <summary>崩溃自愈：按原 URL 重建 Tab（保留在 Tab 条的位置与标题）。</summary>
+    public async Task<bool> RecreateTabAsync(string id, System.Windows.Forms.Control host)
+    {
+        var idx = _tabs.FindIndex(t => t.Id == id);
+        if (idx < 0) return false;
+        var info = _tabs[idx];
+        try { info.View?.Dispose(); } catch { }
+        _tabs[idx] = info with { View = null };
+        // 清掉 disposed 控件，重建
+        await EnsureTabAsync(id, host);
+        return true;
+    }
+
+    private void WireProcessFailed(Microsoft.Web.WebView2.WinForms.WebView2 view)
+    {
+        view.CoreWebView2.ProcessFailed += (_, e) =>
+        {
+            // 进程崩溃 → 通知 UI 层全量重建已激活过的 Tab（浏览器进程死时所有 Tab 一起完）
+            ProcessFailed?.Invoke(e.ProcessFailedKind);
+            Recovering?.Invoke();
+        };
+    }
+
+
+    public static event Action<Microsoft.Web.WebView2.Core.CoreWebView2ProcessFailedKind>? ProcessFailed;
+    public static event Action? Recovering;
 
     private static void WirePolicy(Microsoft.Web.WebView2.WinForms.WebView2 view, AppSettings cfg)
     {
@@ -72,29 +141,25 @@ public sealed class WebTabService : IDisposable
         {
             if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && UrlFilter.IsAllowed(uri, cfg))
             {
-                // 允许的站点：在当前 Tab 打开（简单化：target=_blank 同样导航当前 Tab）
                 e.Handled = true;
                 core.Navigate(uri.ToString());
             }
             else
             {
-                e.Handled = true; // 非白名单新窗口：直接吞掉
+                e.Handled = true;
                 Blocked?.Invoke(uri?.Host ?? "unknown");
             }
         };
 
-        // 3) 下载默认取消（V1 简单策略；Step 4 PDF 都在本地）
+        // 3) 下载默认取消（V1 简单策略；学习场景文件都在本地学习目录）
         core.DownloadStarting += (s, e) =>
         {
             e.Cancel = true;
         };
-
-        // 4) source.com/xxx.pdf 的浏览内置 PDF 查看
     }
 
     private static void WireTitleSync(string id, string title, Microsoft.Web.WebView2.WinForms.WebView2 view)
     {
-        // 顶栏显示 Tab 标题 + 页面标题（B 站网课题目）
         view.CoreWebView2.DocumentTitleChanged += (s, e) =>
         {
             var t = view.CoreWebView2.DocumentTitle;
@@ -108,11 +173,11 @@ public sealed class WebTabService : IDisposable
     public void Activate(string id)
     {
         foreach (var t in _tabs)
-            t.View.Visible = t.Id == id;
+            if (t.View != null) t.View.Visible = t.Id == id;
     }
 
     public void Dispose()
     {
-        foreach (var t in _tabs) t.View.Dispose();
+        foreach (var t in _tabs) try { t.View?.Dispose(); } catch { }
     }
 }

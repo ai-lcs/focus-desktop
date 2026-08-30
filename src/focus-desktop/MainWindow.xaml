@@ -48,12 +48,21 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
                 </ScrollViewer>
 
-                <!-- 音量 -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
-                    <TextBlock Text="🔊" FontSize="14" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <Slider x:Name="VolumeSlider" Width="90" Minimum="0" Maximum="100"
-                            VerticalAlignment="Center" ValueChanged="VolumeSlider_ValueChanged"/>
-                </StackPanel>
+                <!-- 音量：胶囊（静音键 + 细滑轨 + 百分比） -->
+                <Border Grid.Column="1" Background="#1F2226" CornerRadius="14" Padding="10,4" Margin="0,0,12,0"
+                        VerticalAlignment="Center" BorderBrush="#3A3F46" BorderThickness="1">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="MuteButton" Content="🔊" FontSize="13" Padding="2" Margin="0,0,6,0"
+                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                Foreground="{DynamicResource FgBrush}" Click="MuteButton_Click"/>
+                        <Slider x:Name="VolumeSlider" Width="80" Minimum="0" Maximum="100"
+                                VerticalAlignment="Center" Style="{StaticResource SlimSlider}"
+                                ValueChanged="VolumeSlider_ValueChanged"/>
+                        <TextBlock x:Name="VolumePct" Text="50" FontSize="11" Width="22" TextAlignment="Right"
+                                   VerticalAlignment="Center" Margin="6,0,2,0"
+                                   Foreground="{DynamicResource MutedBrush}"/>
+                    </StackPanel>
+                </Border>
 
                 <!-- DEV + 退出 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -105,17 +114,17 @@
                     </WrapPanel>
                 </StackPanel>
 
-                <!-- 右列：计时器卡片 + 番茄钟卡片 -->
-                <Grid Grid.Column="1">
+                <!-- 右列：计时器卡片 + 番茄钟卡片（拉伸铺满列高，修右下空洞） -->
+                <Grid Grid.Column="1" Margin="12,0,0,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
                     <!-- 卡片1：自由计时器 -->
                     <Border Grid.Row="0" Background="{StaticResource CardBg}" CornerRadius="14"
                             BorderBrush="#4A505A" BorderThickness="1"
-                            Padding="24,16" Margin="0,0,0,16" HorizontalAlignment="Center" Width="320">
+                            Padding="24,16" Margin="0,0,0,16">
                         <StackPanel>
                             <Grid>
                                 <TextBlock Text="计时器" FontSize="13" Foreground="#9AA0A6"/>
@@ -133,11 +142,11 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 卡片2：番茄钟（桌面版设计：环形进度+青绿/金+模式按钮+蜂鸣） -->
+                    <!-- 卡片2：番茄钟（占满剩余高度，内容垂直居中） -->
                     <Border Grid.Row="1" Background="{StaticResource CardBg}" CornerRadius="14"
                             BorderBrush="#4A505A" BorderThickness="1"
-                            Padding="24,14" HorizontalAlignment="Center" Width="320">
-                        <local:PomodoroControl x:Name="PomoControl"/>
+                            Padding="24,14">
+                        <local:PomodoroControl x:Name="PomoControl" VerticalAlignment="Center"/>
                     </Border>
                 </Grid>
             </Grid>

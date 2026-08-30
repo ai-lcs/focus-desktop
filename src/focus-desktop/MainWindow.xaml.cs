@@ -30,6 +30,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, WpfButton> _tabButtons = new();
     private System.Windows.Forms.Panel? _hostPanel;
     private string _activeTab = "home";
+    private readonly HashSet<string> _everActivated = new();
+    private int _pdfCount; // PDF 多开计数
 
     // ---- 文件浏览 ----
     private string _filesRoot;
@@ -118,6 +120,8 @@ public partial class MainWindow : Window
         VolumeHelper.Init();
         _volumeReady = true; // 先置位再设滑块值，避免构造期触发 Set
         VolumeSlider.Value = VolumeHelper.Get();
+        VolumePct.Text = VolumeHelper.Get().ToString();
+        MuteButton.Content = VolumeHelper.IsMuted() ? SPK_MUTE : SPK;
     }
 
     private async Task InitAsync()
@@ -135,10 +139,13 @@ public partial class MainWindow : Window
                 _hostPanel = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Fill };
                 WfHost.Child = _hostPanel;
 
-                await _web.CreateTabAsync("bili", "Bilibili", "https://www.bilibili.com", _hostPanel);
-                await _web.CreateTabAsync("chatgpt", "ChatGPT", "https://chatgpt.com", _hostPanel);
-                await _web.CreateTabAsync("gemini", "Gemini", "https://aistudio.google.com", _hostPanel);
-                await _web.CreateTabAsync("deepseek", "DeepSeek", "https://chat.deepseek.com", _hostPanel);
+                // smoke 仍全量急切创建（高危路径必须被测）
+                _web.RegisterTab("bili", "Bilibili", "https://www.bilibili.com");
+                _web.RegisterTab("chatgpt", "ChatGPT", "https://chatgpt.com");
+                _web.RegisterTab("gemini", "Gemini", "https://aistudio.google.com");
+                _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
+                foreach (var tab in _web.Tabs.ToList())
+                    await _web.EnsureTabAsync(tab.Id, _hostPanel);
                 App.SmokeLog("smoke: 4 web tabs created");
 
                 BuildTabBar();
@@ -160,21 +167,33 @@ public partial class MainWindow : Window
             _web = new WebTabService();
             await _web.EnsureEnvironmentAsync();
             WebTabService.Blocked += host => Dispatcher.Invoke(() => ShowBlocked($"已拦截：{host}"));
-            WebTabService.TitleChanged += (id, title) => Dispatcher.Invoke(() =>
+            WebTabService.TitleChanged += OnTabTitleChanged;
+            WebTabService.Recovering += () => Dispatcher.InvokeAsync(async () =>
             {
-                if (_tabButtons.TryGetValue(id, out var btn))
-                    btn.Content = title.Length > 18 ? title[..18] : title;
+                ShowBlocked("网页进程已重启，正在恢复标签页…");
+                // 按原 URL 全量重建已激活过的 Tab
+                if (_hostPanel != null)
+                {
+                    foreach (var t in _web.Tabs)
+                    {
+                        if (_everActivated.Contains(t.Id))
+                        {
+                            try { await _web.RecreateTabAsync(t.Id, _hostPanel); } catch { }
+                        }
+                    }
+                    _web.Activate(_activeTab);
+                    RefreshTabVisuals();
+                }
             });
 
-            // 所有 WebView2 控件挂到同一个 WinForms Panel 上，Tab 切换 = 显隐控件
+            // 懒加载：只注册元数据，首次激活才建控件（启动快 + 崩溃面小）
             _hostPanel = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Fill };
             WfHost.Child = _hostPanel;
 
-            await _web.CreateTabAsync("bili", "Bilibili", "https://www.bilibili.com", _hostPanel);
-            await _web.CreateTabAsync("chatgpt", "ChatGPT", "https://chatgpt.com", _hostPanel);
-            await _web.CreateTabAsync("gemini", "Gemini", "https://aistudio.google.com", _hostPanel);
-            await _web.CreateTabAsync("deepseek", "DeepSeek", "https://chat.deepseek.com", _hostPanel);
-            await _web.CreateTabAsync("pdf", "PDF", "", _hostPanel);
+            _web.RegisterTab("bili", "Bilibili", "https://www.bilibili.com");
+            _web.RegisterTab("chatgpt", "ChatGPT", "https://chatgpt.com");
+            _web.RegisterTab("gemini", "Gemini", "https://aistudio.google.com");
+            _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
 
             BuildTabBar();
         }
@@ -182,6 +201,8 @@ public partial class MainWindow : Window
         {
             App.SmokeLog($"web init failed: {ex.Message}");
             CrashReporter.Write(ex, "web-init");
+            // Runtime 缺失/环境失败：中央友好卡片（不白屏死等）
+            Dispatcher.Invoke(() => ShowWebErrorCard(ex.Message));
         }
 
         // 首次设置模式：config 不存在 → 进入设置（学习目录+登录+退出语）
@@ -193,19 +214,120 @@ public partial class MainWindow : Window
 
     // ---------------- 浏览器式 Tab 条（Home / 学习文件 / 网页 Tab 全在这切换） ----------------
 
-    private WpfButton MakeTabButton(string id, string title)
+    private void OnTabTitleChanged(string id, string title)
     {
+        if (_tabButtons.TryGetValue(id, out var btn) && btn.Content is Border bg
+            && bg.Child is System.Windows.Controls.Grid g && g.Children[0] is StackPanel sp
+            && sp.Children[0] is TextBlock text)
+        {
+            var display = title.Length > 18 ? title[..18] : title;
+            text.Text = display;
+            text.ToolTip = title;
+        }
+    }
+
+    /// <summary>Web 环境失败（如 Runtime 缺失）中央提示卡片。</summary>
+    private void ShowWebErrorCard(string message)
+    {
+        var card = new Border
+        {
+            Background = (Brush)FindResource("PanelBrush"),
+            BorderBrush = (Brush)FindResource("DangerBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(28, 20, 28, 20),
+            MaxWidth = 560,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var sp = new StackPanel();
+        sp.Children.Add(new TextBlock
+        {
+            Text = "网页功能暂不可用",
+            FontSize = 17, FontWeight = FontWeights.Bold,
+            Foreground = (Brush)FindResource("FgBrush"), Margin = new Thickness(0, 0, 0, 8),
+        });
+        sp.Children.Add(new TextBlock
+        {
+            Text = message,
+            FontSize = 13, TextWrapping = TextWrapping.Wrap,
+            Foreground = (Brush)FindResource("MutedBrush"),
+        });
+        card.Child = sp;
+        WebHost.Visibility = Visibility.Collapsed;
+        // 挂到主 Grid（Row=1）中央
+        if (Content is System.Windows.Controls.Grid root && root.Children.Count > 3)
+            root.Children.Add(card);
+        System.Windows.Controls.Grid.SetRow(card, 1);
+    }
+
+    private WpfButton MakeTabButton(string id, string title, bool closable)
+    {
+        // 浏览器式 Tab：圆角上缘 + 激活态顶部青绿下划线 + 可关闭 ✕（Chrome 视觉语言）
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        var text = new TextBlock
+        {
+            Text = title,
+            FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxWidth = 150,
+        };
+        sp.Children.Add(text);
+
+        if (closable)
+        {
+            var close = new WpfButton
+            {
+                Content = "\u2715",
+                FontSize = 10,
+                Padding = new Thickness(4, 1, 4, 1),
+                Margin = new Thickness(7, 0, 0, 0),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = (Brush)FindResource("MutedBrush"),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            close.Click += (_, _) => CloseTabById(id);
+            sp.Children.Add(close);
+        }
+
+        var underline = new Border
+        {
+            Height = 2.5,
+            Background = (Brush)FindResource("AccentBrush"),
+            CornerRadius = new CornerRadius(1),
+            Visibility = Visibility.Collapsed,
+        };
+
+        var grid = new System.Windows.Controls.Grid();
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        sp.Margin = new Thickness(12, 7, closable ? 6 : 12, 6);
+        System.Windows.Controls.Grid.SetRow(sp, 0);
+        System.Windows.Controls.Grid.SetRow(underline, 1);
+        grid.Children.Add(sp);
+        grid.Children.Add(underline);
+
+        var bg = new Border
+        {
+            CornerRadius = new CornerRadius(7, 7, 0, 0),
+            Background = Brushes.Transparent,
+            Child = grid,
+        };
+
         var btn = new WpfButton
         {
-            Content = title,
-            FontSize = 13,
-            Padding = new Thickness(14, 6, 14, 6),
-            Margin = new Thickness(0, 0, 8, 0),
-            Background = (Brush)FindResource("PanelBrush"),
-            Foreground = (Brush)FindResource("MutedBrush"),
+            Content = bg,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 0, 2, 0),
+            Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Cursor = System.Windows.Input.Cursors.Hand,
+            Focusable = false,
         };
+        System.Windows.Automation.AutomationProperties.SetAutomationId(btn, $"tab_{id}");
         btn.Click += (_, _) => ActivateTab(id);
         return btn;
     }
@@ -215,21 +337,18 @@ public partial class MainWindow : Window
         TabBar.Children.Clear();
         _tabButtons.Clear();
 
-        // 固定页：Home + 学习文件（浏览器式，与网页 Tab 同条切换）
-        var home = MakeTabButton("home", "🏠 首页");
-        _tabButtons["home"] = home;
-        TabBar.Children.Add(home);
+        // 固定页（不可关）：Home + 学习文件
+        _tabButtons["home"] = MakeTabButton("home", "\U0001F3E0 首页", false);
+        TabBar.Children.Add(_tabButtons["home"]);
+        _tabButtons["files"] = MakeTabButton("files", "\U0001F4C2 学习文件", false);
+        TabBar.Children.Add(_tabButtons["files"]);
 
-        var files = MakeTabButton("files", "📂 学习文件");
-        _tabButtons["files"] = files;
-        TabBar.Children.Add(files);
-
-        // 网页 Tab
+        // 网页 Tab（可关）
         if (_web != null)
         {
             foreach (var t in _web.Tabs)
             {
-                var btn = MakeTabButton(t.Id, t.Title);
+                var btn = MakeTabButton(t.Id, t.Title, true);
                 _tabButtons[t.Id] = btn;
                 TabBar.Children.Add(btn);
             }
@@ -237,22 +356,86 @@ public partial class MainWindow : Window
         ActivateTab("home");
     }
 
-    private void ActivateTab(string id)
+    /// <summary>注册新 Tab 并立即显示在 Tab 条（PDF 多开用）。</summary>
+    private void AddWebTabButton(string id, string title)
+    {
+        if (_tabButtons.ContainsKey(id)) return;
+        var btn = MakeTabButton(id, title, true);
+        _tabButtons[id] = btn;
+        TabBar.Children.Add(btn);
+    }
+
+    /// <summary>Tab 顺序（从 Tab 条 UIA id 还原）。</summary>
+    private List<string> TabOrder() =>
+        TabBar.Children.OfType<WpfButton>()
+              .Select(b => System.Windows.Automation.AutomationProperties.GetAutomationId(b)?[4..])
+              .Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).ToList();
+
+    private void CloseTabById(string id)
+    {
+        if (id is "home" or "files") return; // 固定页不可关
+        var order = TabOrder();
+        var pos = order.IndexOf(id);
+        _web?.CloseTab(id);
+        if (_tabButtons.Remove(id, out var btn) && btn.Parent is System.Windows.Controls.Panel parent)
+            parent.Children.Remove(btn);
+        var next = pos >= 0 && pos < order.Count - 1 ? order[pos + 1]
+                 : pos > 0 ? order[pos - 1] : "home";
+        if (_activeTab == id) ActivateTab(next);
+        else RefreshTabVisuals();
+    }
+
+    private void RefreshTabVisuals()
+    {
+        foreach (var (tid, btn) in _tabButtons)
+        {
+            var active = tid == _activeTab;
+            if (btn.Content is not Border bg) continue;
+            bg.Background = active
+                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x3B, 0x41, 0x4B))
+                : Brushes.Transparent;
+            if (bg.Child is System.Windows.Controls.Grid g
+                && g.Children.Count == 2
+                && g.Children[0] is StackPanel sp && sp.Children[0] is TextBlock text
+                && g.Children[1] is Border underline)
+            {
+                text.Foreground = active ? (Brush)FindResource("FgBrush") : (Brush)FindResource("MutedBrush");
+                underline.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+    }
+
+    private async void ActivateTab(string id)
     {
         _activeTab = id;
         HomeView.Visibility = id == "home" ? Visibility.Visible : Visibility.Collapsed;
         FilesView.Visibility = id == "files" ? Visibility.Visible : Visibility.Collapsed;
-        WebHost.Visibility = _web != null && _web.Tabs.Any(t => t.Id == id)
-            ? Visibility.Visible : Visibility.Collapsed;
+        var isWeb = _web != null && _web.Tabs.Any(t => t.Id == id);
+        WebHost.Visibility = isWeb ? Visibility.Visible : Visibility.Collapsed;
 
-        _web?.Activate(id);
-
-        foreach (var (tid, btn) in _tabButtons)
+        // 懒加载：首次激活才真正创建 WebView2 控件
+        if (isWeb && _web != null && _hostPanel != null)
         {
-            var active = tid == id;
-            btn.Background = active ? (Brush)FindResource("BgBrush") : (Brush)FindResource("PanelBrush");
-            btn.Foreground = active ? (Brush)FindResource("FgBrush") : (Brush)FindResource("MutedBrush");
+            var info = _web.Tabs.First(t => t.Id == id);
+            if (info.View == null)
+            {
+                if (_tabButtons.TryGetValue(id, out var btn0) && btn0.Content is Border b0
+                    && b0.Child is System.Windows.Controls.Grid g0 && g0.Children[0] is StackPanel s0
+                    && s0.Children[0] is TextBlock t0)
+                    t0.Text = "加载中…";
+                try { await _web.EnsureTabAsync(id, _hostPanel); }
+                catch (Exception ex)
+                {
+                    ShowBlocked($"网页组件启动失败：{ex.Message}");
+                    CrashReporter.Write(ex, $"lazy-tab-{id}");
+                }
+            }
         }
+
+        if (isWeb) _everActivated.Add(id);
+        if (isWeb) _everActivated.Add(id);
+        _web?.Activate(id);
+        RefreshTabVisuals();
     }
 
     // ---------------- 导航（首页按钮也走 ActivateTab） ----------------
@@ -433,18 +616,25 @@ public partial class MainWindow : Window
         return btn;
     }
 
-    private void OpenFile(string path)
+    private async void OpenFile(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
         if (ext == ".pdf" || ext is ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" || ext is ".txt" or ".md")
         {
-            // 内置打开：WebView2 file:/// 导航（PDF 走内置查看器）
-            var tab = _web?.Tabs.FirstOrDefault(t => t.Id == "pdf");
-            if (tab != null)
-            {
-                tab.View.CoreWebView2.Navigate(new Uri(path).AbsoluteUri);
-                ActivateTab("pdf");
-            }
+            if (_web == null || _hostPanel == null) { ShowBlocked("网页组件未就绪"); return; }
+
+            // 同文件复用已开 Tab；否则新开（多开）
+            var uri = new Uri(path).AbsoluteUri;
+            var existing = _web.Tabs.FirstOrDefault(t =>
+                t.Id.StartsWith("pdf-") && t.InitialUrl == uri);
+            if (existing != null) { ActivateTab(existing.Id); return; }
+
+            var id = $"pdf-{++_pdfCount}";
+            var name = Path.GetFileNameWithoutExtension(path);
+            _web.RegisterTab(id, name, uri);
+            AddWebTabButton(id, name);
+            await _web.EnsureTabAsync(id, _hostPanel);
+            ActivateTab(id);
         }
         else
         {
@@ -456,8 +646,23 @@ public partial class MainWindow : Window
 
     private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_volumeReady) VolumeHelper.Set((int)e.NewValue);
+        if (_volumeReady)
+        {
+            VolumeHelper.Set((int)e.NewValue);
+            VolumePct.Text = ((int)e.NewValue).ToString();
+            if (e.NewValue > 0) MuteButton.Content = SPK;
+        }
     }
+
+    /// <summary>静音/恢复（记住静音前音量）。</summary>
+    private void MuteButton_Click(object sender, RoutedEventArgs e)
+    {
+        var muted = VolumeHelper.ToggleMute();
+        MuteButton.Content = muted ? SPK_MUTE : SPK;
+    }
+
+    private const string SPK = "🔊";
+    private const string SPK_MUTE = "🔇";
 
     private bool _volumeReady;
 
@@ -497,6 +702,33 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 ToggleTimer();
             }
+        }
+        else if (e.Key == System.Windows.Input.Key.Tab
+                 && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control)
+        {
+            // Ctrl+Tab：下一个 Tab（浏览器习惯）
+            e.Handled = true;
+            var order = TabOrder();
+            if (order.Count > 1)
+            {
+                var i = order.IndexOf(_activeTab);
+                var next = order[(i + 1) % order.Count];
+                ActivateTab(next);
+            }
+        }
+        else if (e.Key == System.Windows.Input.Key.D1
+                 && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control)
+        {
+            e.Handled = true;
+            var order = TabOrder();
+            if (order.Count > 0) ActivateTab(order[0]);
+        }
+        else if (e.Key == System.Windows.Input.Key.D2
+                 && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control)
+        {
+            e.Handled = true;
+            var order = TabOrder();
+            if (order.Count > 1) ActivateTab(order[1]);
         }
         else if (e.Key == System.Windows.Input.Key.R && HomeView.Visibility == Visibility.Visible
                  && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control
