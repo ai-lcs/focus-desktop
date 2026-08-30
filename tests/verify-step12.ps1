@@ -37,6 +37,23 @@ public static class Win32Probe {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr i, int x, int y, int cx, int cy, uint f);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint data, UIntPtr extra);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
+    public delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
+    public static int GetSystemMetricsSafe(int i) { try { return GetSystemMetrics(i); } catch { return 0; } }
+    public static IntPtr FindOtherWindowOfProcess(IntPtr mainHwnd, int pid) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows(delegate(IntPtr h, IntPtr l) {
+            uint wpid; GetWindowThreadProcessId(h, out wpid);
+            if (wpid == (uint)pid && h != mainHwnd && IsWindowVisible(h) && GetParent(h) == IntPtr.Zero) { found = h; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int L, T, R, B; }
@@ -188,8 +205,8 @@ else { Fail "重启自愈" "无 self-heal 日志且任务栏未隐藏" }
 # ---------- 9. 干净退出（UIA 点击退出按钮）----------
 Info "UIA 点击退出按钮……"
 Add-Type -AssemblyName UIAutomationClient
-$proc = Get-Process "focus-desktop" -ErrorAction Stop
-$root = [System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
+$proc = @(Get-Process "focus-desktop" -ErrorAction Stop) | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+$root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$proc.MainWindowHandle)
 $cond = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::NameProperty, "退出")
 $btn = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
@@ -197,28 +214,43 @@ if ($btn) {
     $invoke = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $invoke.Invoke()
     Start-Sleep -Milliseconds 1500
-    # 退出验证弹窗（独立 ExitWindow 顶层窗口）：从根元素找，读取 config.json 退出语填入再确认
+    # 退出验证弹窗（ExitWindow）：WPF 模态窗口 UIA 树挂不上——Win32 FindWindow 按标题找 hwnd，
+    # 然后鼠标点击输入框（窗口坐标）→ SendKeys 打字 → 点击确认按钮（坐标）
     $cfgFile = Join-Path $DataDir "config.json"
     $phrase = (Get-Content $cfgFile -Raw | ConvertFrom-Json).exitPhrase
-    $dlgCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty, "确认离开专注环境")
-    $dlg = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $dlgCond)
-    if ($dlg) {
-        $inputCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
-        $inputBox = $dlg.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $inputCond)
-        if ($inputBox) {
-            $vp = $inputBox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-            $vp.SetValue($phrase)
-            Start-Sleep -Milliseconds 400
-            $okCond = New-Object System.Windows.Automation.PropertyCondition(
-                [System.Windows.Automation.AutomationElement]::NameProperty, "确认退出")
-            $okBtn = $dlg.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $okCond)
-            if ($okBtn) {
-                ($okBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
-            } else { Fail "干净退出" "弹窗内未找到确认退出按钮" }
-        } else { Fail "干净退出" "弹窗内未找到输入框" }
-    } else { Fail "干净退出" "未找到退出弹窗窗口" }
+    $dlgHwnd = [IntPtr]::Zero
+    for ($try = 0; $try -lt 12 -and $dlgHwnd -eq [IntPtr]::Zero; $try++) {
+        $dlgHwnd = [Win32Probe]::FindOtherWindowOfProcess([IntPtr]$proc.MainWindowHandle, $proc.Id)
+        if ($dlgHwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 }
+    }
+    if ($dlgHwnd -ne [IntPtr]::Zero) {
+        # 窗口客户区矩形（GetWindowRect 近似）
+        $r = New-Object Win32Probe+RECT
+        [Win32Probe]::GetWindowRect($dlgHwnd, [ref]$r) | Out-Null
+        $dlgW = $r.Right - $r.Left
+        $dlgH = $r.Bottom - $r.Top
+        # 布局按比例 + 钳制到物理屏幕内（弹窗可能超出小屏幕：输入框约 55% 高，确认按钮右下）
+        $sw2 = [Win32Probe]::GetSystemMetricsSafe(0); $sh2 = [Win32Probe]::GetSystemMetricsSafe(1)
+        $inputX = [Math]::Max(0, [Math]::Min($r.Left + [int]($dlgW * 0.5), $sw2 - 4))
+        $inputY = [Math]::Max(0, [Math]::Min($r.Top + [int]($dlgH * 0.56), $sh2 - 4))
+        $okX = [Math]::Max(0, [Math]::Min($r.Right - 70, $sw2 - 4))
+        $okY = [Math]::Max(0, [Math]::Min($r.Bottom - 34, $sh2 - 4))
+        # 激活弹窗 + 点输入框
+        [Win32Probe]::SetForegroundWindow($dlgHwnd) | Out-Null
+        Start-Sleep -Milliseconds 300
+        [Win32Probe]::SetCursorPos($inputX, $inputY) | Out-Null
+        [Win32Probe]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); [Win32Probe]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) # down+up
+        Start-Sleep -Milliseconds 400
+        # 清空可能存在的文本（全选删除）再打退出语
+        Set-Clipboard -Value $phrase
+        Start-Sleep -Milliseconds 200
+        [System.Windows.Forms.SendKeys]::SendWait("^a")
+        Start-Sleep -Milliseconds 100
+        [System.Windows.Forms.SendKeys]::SendWait("^v")
+        Start-Sleep -Milliseconds 600
+        # 确认：回车键（弹窗前台+焦点在输入框，Enter 即确认；坐标点击在 DPI 缩放下不可靠）
+        [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    } else { Fail "干净退出" "Win32 FindWindow 未找到弹窗" }
     Start-Sleep -Milliseconds 2500
     if (-not (Get-Process "focus-desktop" -ErrorAction SilentlyContinue)) {
         Pass "干净退出（UIA 点击退出 → 进程退出）"

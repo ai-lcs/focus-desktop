@@ -38,6 +38,23 @@ public class AppSettings
         "login.live.com",
     };
 
+    // ---- 番茄钟（高度自定义，PomodoroService 读取） ----
+    [JsonPropertyName("pomodoroWorkMinutes")]
+    public int? PomodoroWorkMinutes { get; set; }
+
+    [JsonPropertyName("pomodoroShortBreakMinutes")]
+    public int? PomodoroShortBreakMinutes { get; set; }
+
+    [JsonPropertyName("pomodoroLongBreakMinutes")]
+    public int? PomodoroLongBreakMinutes { get; set; }
+
+    [JsonPropertyName("pomodoroCyclesUntilLong")]
+    public int? PomodoroCyclesUntilLong { get; set; }
+
+    /// <summary>首页专注语（一句让自己专注的话，config 可改）。</summary>
+    [JsonPropertyName("focusQuote")]
+    public string FocusQuote { get; set; } = "专注当下这一件事，直到它完成。";
+
     public static bool Exists() => File.Exists(Paths.ConfigFile);
 
     public static AppSettings LoadOrDefault()

@@ -21,6 +21,13 @@ public partial class App : Application
         _options = AppOptions.Parse(e.Args);
         WireGlobalExceptionHandlers();
 
+        // --watchdog <pid>：看门狗伴生进程模式（无 UI，Run到主进程消失）
+        if (e.Args.Length >= 2 && e.Args[0] == "--watchdog" && int.TryParse(e.Args[1], out var parentPid))
+        {
+            Environment.Exit(WatchdogService.RunLoop(parentPid));
+            return;
+        }
+
         // --urltest：白名单逻辑自测（无 UI，控制台输出即退）
         if (e.Args.Contains("--urltest"))
         {
@@ -93,6 +100,12 @@ public partial class App : Application
         // 正常退出路径：无论从哪里触发 Shutdown，都走同一条恢复逻辑
         try { _focus?.ExitIfActive(); }
         catch (Exception ex) { CrashReporter.Write(ex, "on-exit"); }
+
+        // 收尾兜底（2026-08-30 事故强化）：Exit() 里的 Show() 可能被「全屏窗口还在」
+        // 吞掉（Win11 任务栏延迟应用）；此时所有窗口已关，再验证并补一次，确保任务栏可见
+        try { TaskbarService.Show(); }
+        catch (Exception ex) { CrashReporter.Write(ex, "on-exit-taskbar"); }
+
         _singleInstanceMutex?.ReleaseMutex();
         base.OnExit(e);
     }

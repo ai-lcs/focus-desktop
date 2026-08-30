@@ -13,21 +13,23 @@ public sealed class FocusModeService
 
     public bool IsActive { get; private set; }
 
-    /// <summary>进入锁定：脏标志 → 隐藏任务栏 → 挂钩子。</summary>
+    /// <summary>进入锁定：脏标志 → 看门狗 → 隐藏任务栏 → 挂钩子。</summary>
     public void Enter()
     {
         if (IsActive) return;
 
         RecoveryService.MarkActive(); // 1. 先立牌：从这一刻起崩了下次要自愈
 
-        TaskbarService.Hide();        // 2. 藏任务栏
+        WatchdogService.Launch();     // 2. 看门狗伴生进程（taskkill /f 等进程突然消失时兜底恢复）
 
-        _keyboard.Install();          // 3. 挂键盘钩子（最后挂：钩子要在 UI 线程消息循环里活着）
+        TaskbarService.Hide();        // 3. 藏任务栏
+
+        _keyboard.Install();          // 4. 挂键盘钩子（最后挂：钩子要在 UI 线程消息循环里活着）
 
         IsActive = true;
     }
 
-    /// <summary>正常退出：钩子 → 任务栏 → 清标志。完全倒序。</summary>
+    /// <summary>正常退出：钩子 → 任务栏 → 杀看门狗 → 清标志。完全倒序。</summary>
     public void Exit()
     {
         if (!IsActive) return;
@@ -37,7 +39,9 @@ public sealed class FocusModeService
 
         var shown = TaskbarService.Show(); // 2. 恢复任务栏（含 explorer 兜底）
 
-        RecoveryService.MarkClean();  // 3. 最后清牌
+        WatchdogService.Stop();       // 3. 杀看门狗（恢复已完成，它无事可做）
+
+        RecoveryService.MarkClean();  // 4. 最后清牌
 
         if (!shown)
         {
@@ -52,6 +56,7 @@ public sealed class FocusModeService
     {
         try { _keyboard.Uninstall(); } catch { }
         try { TaskbarService.Show(); } catch { }
+        try { WatchdogService.Stop(); } catch { }
         try { RecoveryService.MarkClean(); } catch { }
         IsActive = false;
     }

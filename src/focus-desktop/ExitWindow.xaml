@@ -2,13 +2,14 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="确认离开专注环境"
+        AutomationProperties.AutomationId="ExitWindow"
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Topmost="True"
-        SizeToContent="Height"
         Width="560"
-        WindowStartupLocation="CenterScreen"
+        Height="400"
+        WindowStartupLocation="Manual"
         Background="{DynamicResource PanelBrush}"
         Foreground="{DynamicResource FgBrush}">
     <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="32,28">

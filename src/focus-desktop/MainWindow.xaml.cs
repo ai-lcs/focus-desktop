@@ -18,17 +18,18 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
-    // ---- 计时器（Focuser pomodoro.rs 模型：时间戳 + 冻结剩余） ----
+    // ---- 自由计时器（时间戳 + 冻结剩余，Focuser 模型） ----
     private DateTime _phaseStart;
     private TimeSpan _elapsedWhenPaused;
     private bool _timerRunning;
-    private bool _countdownMode;
-    private int _countdownMinutes = 25;
+
+
 
     // ---- Web 层 ----
     private WebTabService? _web;
     private readonly Dictionary<string, WpfButton> _tabButtons = new();
     private System.Windows.Forms.Panel? _hostPanel;
+    private string _activeTab = "home";
 
     // ---- 文件浏览 ----
     private string _filesRoot;
@@ -42,25 +43,30 @@ public partial class MainWindow : Window
         _focus = focus;
         InitializeComponent();
 
-        _filesRoot = AppSettings.LoadOrDefault().StudyFolder;
+        var cfg = AppSettings.LoadOrDefault();
+        _filesRoot = cfg.StudyFolder;
         _currentDir = _filesRoot;
 
-        // 铺满主屏（单显示器项目，按用户决策不做多屏）
+        // 铺满主屏（单显示器项目，按用户决策不做多屏）。
+        // 关键坑（2026-08-30 实测）：本机 WPF 逻辑尺寸≈物理尺寸的 2 倍（DPI 200% 感知），
+        // 手动设 Width/Height=PrimaryScreen* 只改窗口物理矩形，内容仍按逻辑坐标布局
+        // → 右栏卡片全部落在物理屏幕外（UIA 矩形 L=1656 > 屏宽 1280）。
+        // 修法：Maximized 让 WPF/DWM 自己对齐屏幕，内容布局自适应；无边框全屏效果不变。
+        WindowStartupLocation = WindowStartupLocation.Manual;
         Left = 0;
         Top = 0;
-        Width = SystemParameters.PrimaryScreenWidth;
-        Height = SystemParameters.PrimaryScreenHeight;
         // 预览模式：普通可切换窗口（不置顶、不覆盖全屏体验），给用户调配置用
         if (options.Preview)
         {
             Topmost = false;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Width = Math.Min(1280, SystemParameters.PrimaryScreenWidth - 80);
             Height = Math.Min(800, SystemParameters.PrimaryScreenHeight - 80);
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
         else
         {
             Topmost = true;
+            WindowState = WindowState.Maximized;
         }
 
         if (options.Dev || options.Preview)
@@ -69,35 +75,35 @@ public partial class MainWindow : Window
             DevBadgeText.Text = options.Preview ? "预览" : "DEV";
         }
 
-        _clock.Tick += (_, _) => ClockText.Text = DateTime.Now.ToString("HH:mm:ss");
-        _clock.Start();
-        ClockText.Text = DateTime.Now.ToString("HH:mm:ss");
+        // 专注语（config.json focusQuote 可改）
+        FocusQuote.Text = cfg.FocusQuote;
 
+        // 番茄钟（桌面版设计控件，自带环形进度/模式按钮/蜂鸣）
+        PomoControl.LoadConfig(cfg);
+
+        // 时钟：顶栏小钟 + 首页大钟
+        _clock.Tick += (_, _) =>
+        {
+            var now = DateTime.Now;
+            BigClock.Text = now.ToString("HH:mm");
+            ClockDate.Text = now.ToString("M月d日 dddd");
+        };
+        _clock.Start();
+        var n = DateTime.Now;
+        BigClock.Text = n.ToString("HH:mm");
+        ClockDate.Text = n.ToString("M月d日 dddd");
+
+        // 自由计时器 tick
         _timer.Tick += (_, _) =>
         {
             if (_timerRunning)
             {
                 var elapsed = _elapsedWhenPaused + (DateTime.Now - _phaseStart);
-                if (_countdownMode)
-                {
-                    var remain = TimeSpan.FromMinutes(_countdownMinutes) - elapsed;
-                    TimerBig.Text = remain > TimeSpan.Zero ? remain.ToString(@"hh\:mm\:ss") : "00:00:00";
-                    if (remain <= TimeSpan.Zero)
-                    {
-                        _timerRunning = false;
-                        _timer.Stop();
-                        TimerHint.Text = "倒计时结束 · 空格重新开始";
-                    }
-                }
-                else
-                {
-                    TimerBig.Text = elapsed.ToString(@"hh\:mm\:ss");
-                }
+                TimerBig.Text = elapsed.ToString(@"hh\:mm\:ss");
             }
         };
 
         Loaded += async (_, _) => await InitAsync();
-        SourceInitialized += (_, _) => { };
         Closing += (_, e) =>
         {
             if (!_recoveryExitDone)
@@ -110,6 +116,7 @@ public partial class MainWindow : Window
 
         // 声音：Core Audio 简版（IAudioEndpointVolume）
         VolumeHelper.Init();
+        _volumeReady = true; // 先置位再设滑块值，避免构造期触发 Set
         VolumeSlider.Value = VolumeHelper.Get();
     }
 
@@ -117,8 +124,7 @@ public partial class MainWindow : Window
     {
         if (_options.Smoke)
         {
-            // smoke 模式也初始化 Web 层（验证 WebView2 环境创建 + 四站 Tab 不炸），
-            // 但停留时间拉长让页面加载完成
+            // smoke 模式也初始化 Web 层（验证 WebView2 环境创建 + 四站 Tab 不炸）
             try
             {
                 _web = new WebTabService();
@@ -153,7 +159,7 @@ public partial class MainWindow : Window
         {
             _web = new WebTabService();
             await _web.EnsureEnvironmentAsync();
-            WebTabService.Blocked += host => Dispatcher.Invoke(() => ShowBlocked(host));
+            WebTabService.Blocked += host => Dispatcher.Invoke(() => ShowBlocked($"已拦截：{host}"));
             WebTabService.TitleChanged += (id, title) => Dispatcher.Invoke(() =>
             {
                 if (_tabButtons.TryGetValue(id, out var btn))
@@ -185,39 +191,59 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------------- Tab 条 ----------------
+    // ---------------- 浏览器式 Tab 条（Home / 学习文件 / 网页 Tab 全在这切换） ----------------
+
+    private WpfButton MakeTabButton(string id, string title)
+    {
+        var btn = new WpfButton
+        {
+            Content = title,
+            FontSize = 13,
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(0, 0, 8, 0),
+            Background = (Brush)FindResource("PanelBrush"),
+            Foreground = (Brush)FindResource("MutedBrush"),
+            BorderThickness = new Thickness(0),
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+        btn.Click += (_, _) => ActivateTab(id);
+        return btn;
+    }
 
     private void BuildTabBar()
     {
         TabBar.Children.Clear();
         _tabButtons.Clear();
-        foreach (var t in _web!.Tabs)
+
+        // 固定页：Home + 学习文件（浏览器式，与网页 Tab 同条切换）
+        var home = MakeTabButton("home", "🏠 首页");
+        _tabButtons["home"] = home;
+        TabBar.Children.Add(home);
+
+        var files = MakeTabButton("files", "📂 学习文件");
+        _tabButtons["files"] = files;
+        TabBar.Children.Add(files);
+
+        // 网页 Tab
+        if (_web != null)
         {
-            var btn = new Button
+            foreach (var t in _web.Tabs)
             {
-                Content = t.Title,
-                FontSize = 13,
-                Padding = new Thickness(14, 6, 14, 6),
-                Margin = new Thickness(0, 0, 8, 0),
-                Background = (Brush)FindResource("PanelBrush"),
-                Foreground = (Brush)FindResource("MutedBrush"),
-                BorderBrush = (Brush)FindResource("BorderBrush"),
-                BorderThickness = new Thickness(0),
-                Cursor = System.Windows.Input.Cursors.Hand,
-            };
-            var id = t.Id;
-            btn.Click += (_, _) => ActivateTab(id);
-            _tabButtons[id] = btn;
-            TabBar.Children.Add(btn);
+                var btn = MakeTabButton(t.Id, t.Title);
+                _tabButtons[t.Id] = btn;
+                TabBar.Children.Add(btn);
+            }
         }
         ActivateTab("home");
     }
 
     private void ActivateTab(string id)
     {
+        _activeTab = id;
         HomeView.Visibility = id == "home" ? Visibility.Visible : Visibility.Collapsed;
         FilesView.Visibility = id == "files" ? Visibility.Visible : Visibility.Collapsed;
-        WebHost.Visibility = id is "bili" or "chatgpt" or "gemini" or "deepseek" or "pdf" ? Visibility.Visible : Visibility.Collapsed;
+        WebHost.Visibility = _web != null && _web.Tabs.Any(t => t.Id == id)
+            ? Visibility.Visible : Visibility.Collapsed;
 
         _web?.Activate(id);
 
@@ -229,17 +255,50 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------------- 导航 ----------------
+    // ---------------- 导航（首页按钮也走 ActivateTab） ----------------
 
     private void Nav_Files_Click(object sender, RoutedEventArgs e)
     {
         ActivateTab("files");
-        RenderFiles(); // 进入即渲染（旧版漏了这行 → 首次进入永远空白）
+        RenderFiles();
     }
     private void Nav_Bili_Click(object sender, RoutedEventArgs e) => ActivateTab("bili");
     private void Nav_ChatGPT_Click(object sender, RoutedEventArgs e) => ActivateTab("chatgpt");
     private void Nav_Gemini_Click(object sender, RoutedEventArgs e) => ActivateTab("gemini");
     private void Nav_DeepSeek_Click(object sender, RoutedEventArgs e) => ActivateTab("deepseek");
+
+    // ---------------- 自由计时器 ----------------
+
+    private void Timer_Toggle_Click(object sender, RoutedEventArgs e) => ToggleTimer();
+    private void Timer_Reset_Click(object sender, RoutedEventArgs e) => ResetTimer();
+
+    private void ToggleTimer()
+    {
+        if (_timerRunning)
+        {
+            _elapsedWhenPaused += DateTime.Now - _phaseStart;
+            _timerRunning = false;
+            TimerBtnToggle.Content = "继续";
+            TimerHint.Text = "已暂停";
+        }
+        else
+        {
+            _phaseStart = DateTime.Now;
+            _timerRunning = true;
+            _timer.Start();
+            TimerBtnToggle.Content = "暂停";
+            TimerHint.Text = "计时中";
+        }
+    }
+
+    private void ResetTimer()
+    {
+        _timerRunning = false;
+        _elapsedWhenPaused = TimeSpan.Zero;
+        TimerBig.Text = "00:00:00";
+        TimerBtnToggle.Content = "开始";
+        TimerHint.Text = "空格 开始/暂停";
+    }
 
     // ---------------- 文件浏览 ----------------
 
@@ -259,7 +318,6 @@ public partial class MainWindow : Window
             UseDescriptionForTitle = true,
             ShowNewFolderButton = true,
         };
-        // 初始定位：当前配置目录存在则从它开始，否则从 D:\ 开始
         try
         {
             if (Directory.Exists(_filesRoot))
@@ -278,7 +336,6 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK
             && !string.IsNullOrWhiteSpace(dlg.SelectedPath))
         {
-            // 写入配置 + 立即刷新文件页
             var cfg = AppSettings.LoadOrDefault();
             cfg.StudyFolder = dlg.SelectedPath;
             cfg.Save();
@@ -301,7 +358,7 @@ public partial class MainWindow : Window
     private void RenderFiles()
     {
         FileList.Items.Clear();
-        FilesPath.Text = _currentDir; // 顶栏显示当前目录
+        FilesPath.Text = _currentDir;
         if (!Directory.Exists(_filesRoot))
         {
             FileList.Items.Add(new TextBlock
@@ -354,7 +411,7 @@ public partial class MainWindow : Window
 
     private FrameworkElement MakeFileItem(string icon, string name, Action open)
     {
-        var btn = new Button
+        var btn = new WpfButton
         {
             Content = new StackPanel
             {
@@ -389,7 +446,6 @@ public partial class MainWindow : Window
                 ActivateTab("pdf");
             }
         }
-        // 其他格式 V1 不支持（spec §5）：docx/pptx 提示
         else
         {
             ShowBlocked($"V1 内置支持 PDF/图片/TXT，暂不支持 {ext}。请先转 PDF 放入学习目录。");
@@ -417,8 +473,6 @@ public partial class MainWindow : Window
             return;
         }
         // 正式模式：独立置顶窗口验证退出语
-        // （旧版是主窗口内嵌 Grid 弹窗：Grid.Row 缺失被压进顶栏 + airspace 被网页盖住 →
-        //  2026-08-30 用户"退不出来"事故根因，改为独立 Window 一并解决两个问题）
         var cfg = AppSettings.LoadOrDefault();
         var dlg = new ExitWindow(cfg.ExitPhrase) { Owner = this };
         if (dlg.ShowDialog() == true)
@@ -428,15 +482,21 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------------- 键盘：空格计时 / Esc ----------------
+    // ---------------- 键盘：空格计时 ----------------
 
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
         if (e.Key == System.Windows.Input.Key.Space && HomeView.Visibility == Visibility.Visible)
         {
-            e.Handled = true;
-            ToggleTimer();
+            // 仅当焦点不在输入控件上时才当快捷键（避免在搜索框/退出框打空格误触）
+            var focused = System.Windows.Input.FocusManager.GetFocusedElement(this) as System.Windows.DependencyObject;
+            bool inInput = focused is System.Windows.Controls.TextBox or System.Windows.Controls.ComboBox;
+            if (!inInput)
+            {
+                e.Handled = true;
+                ToggleTimer();
+            }
         }
         else if (e.Key == System.Windows.Input.Key.R && HomeView.Visibility == Visibility.Visible
                  && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control
@@ -445,31 +505,6 @@ public partial class MainWindow : Window
             e.Handled = true;
             ResetTimer();
         }
-    }
-
-    private void ToggleTimer()
-    {
-        if (_timerRunning)
-        {
-            _elapsedWhenPaused += DateTime.Now - _phaseStart;
-            _timerRunning = false;
-            TimerHint.Text = "已暂停 · 空格继续";
-        }
-        else
-        {
-            _phaseStart = DateTime.Now;
-            _timerRunning = true;
-            _timer.Start();
-            TimerHint.Text = "计时中 · 空格暂停";
-        }
-    }
-
-    private void ResetTimer()
-    {
-        _timerRunning = false;
-        _elapsedWhenPaused = TimeSpan.Zero;
-        TimerBig.Text = "00:00:00";
-        TimerHint.Text = "已重置 · 空格开始";
     }
 
     // ---------------- 其他 ----------------
@@ -504,7 +539,7 @@ public partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = (Brush)FindResource("FgBrush"),
         });
-        var startBtn = new Button
+        var startBtn = new WpfButton
         {
             Content = "开始专注",
             FontSize = 14,
@@ -525,10 +560,10 @@ public partial class MainWindow : Window
         };
         sp.Children.Add(startBtn);
         banner.Child = sp;
-        // 插到 HomeView 顶部
-        if (HomeView is StackPanel sp2)
+        // 插到 HomeView（现为 Grid）第一行上方：放进左列 StackPanel 顶部
+        if (HomeView is Grid g && g.Children.Count > 0 && g.Children[0] is StackPanel left)
         {
-            sp2.Children.Insert(0, banner);
+            left.Children.Insert(0, banner);
         }
     }
 

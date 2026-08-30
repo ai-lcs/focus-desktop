@@ -1,6 +1,7 @@
 <Window x:Class="focus_desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:focus_desktop"
         Title="focus-desktop"
         WindowStyle="None"
         ResizeMode="NoResize"
@@ -12,63 +13,50 @@
         UseLayoutRounding="True">
 
     <Window.Resources>
-        <Style x:Key="NavBtn" TargetType="Button">
-            <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource FgBrush}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="22,12"/>
-            <Setter Property="FontSize" Value="16"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <!-- 舒适背景：暖夜色渐变（深而不黑，柔和） -->
+        <LinearGradientBrush x:Key="ComfortBg" StartPoint="0.1,0" EndPoint="0.9,1">
+            <GradientStop Color="#23262C" Offset="0"/>
+            <GradientStop Color="#2B2F37" Offset="0.55"/>
+            <GradientStop Color="#31353E" Offset="1"/>
+        </LinearGradientBrush>
+        <!-- 卡片：比背景亮一档 + 细边框（保证可见对比） -->
+        <LinearGradientBrush x:Key="CardBg" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#3E434D" Offset="0"/>
+            <GradientStop Color="#353A43" Offset="1"/>
+        </LinearGradientBrush>
     </Window.Resources>
 
-    <Grid>
+    <Grid Background="{StaticResource ComfortBg}">
         <Grid.RowDefinitions>
             <RowDefinition Height="44"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- 顶栏：Tab 条 | 时钟 | 音量 | DEV | 退出 -->
-        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}"
+        <!-- 顶栏：Tab 条 | 音量 | DEV | 退出（时间已移到首页大钟） -->
+        <Border Grid.Row="0" Background="#26292E"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <Grid Margin="12,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Tab 条 -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
-
-                <!-- 时钟 -->
-                <TextBlock Grid.Column="1" x:Name="ClockText" Text="00:00:00"
-                           FontSize="15" FontFamily="Consolas" Margin="16,0"
-                           VerticalAlignment="Center" Foreground="{DynamicResource FgBrush}"/>
+                <!-- Tab 条（浏览器式，横向滚动） -->
+                <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Disabled">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
+                </ScrollViewer>
 
                 <!-- 音量 -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
                     <TextBlock Text="🔊" FontSize="14" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <Slider x:Name="VolumeSlider" Width="90" Minimum="0" Maximum="100"
                             VerticalAlignment="Center" ValueChanged="VolumeSlider_ValueChanged"/>
                 </StackPanel>
 
                 <!-- DEV + 退出 -->
-                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border x:Name="DevBadge" Background="#5F5B00" CornerRadius="4" Padding="8,2" Margin="0,0,12,0"
                             Visibility="Collapsed">
                         <TextBlock x:Name="DevBadgeText" Text="DEV" FontSize="12" FontWeight="Bold" Foreground="#FDD663"/>
@@ -83,23 +71,76 @@
             </Grid>
         </Border>
 
-        <!-- 主区：各视图容器（代码切换 Visibility） -->
+        <!-- 主区 -->
         <Grid Grid.Row="1">
-            <!-- Home：计时器 -->
-            <StackPanel x:Name="HomeView" VerticalAlignment="Center" HorizontalAlignment="Center">
-                <TextBlock x:Name="TimerBig" Text="00:00:00" FontSize="84" FontWeight="Light"
-                           FontFamily="Consolas"
-                           Foreground="{DynamicResource FgBrush}" HorizontalAlignment="Center"/>
-                <TextBlock x:Name="TimerHint" Text="正计时 · 空格 开始/暂停" FontSize="14" Margin="0,6,0,32"
-                           HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
-                <WrapPanel HorizontalAlignment="Center">
-                    <Button Style="{StaticResource NavBtn}" Content="学习文件" Margin="5" Click="Nav_Files_Click"/>
-                    <Button Style="{StaticResource NavBtn}" Content="Bilibili" Margin="5" Click="Nav_Bili_Click"/>
-                    <Button Style="{StaticResource NavBtn}" Content="ChatGPT" Margin="5" Click="Nav_ChatGPT_Click"/>
-                    <Button Style="{StaticResource NavBtn}" Content="Gemini" Margin="5" Click="Nav_Gemini_Click"/>
-                    <Button Style="{StaticResource NavBtn}" Content="DeepSeek" Margin="5" Click="Nav_DeepSeek_Click"/>
-                </WrapPanel>
-            </StackPanel>
+
+            <!-- Home：左钟右卡，紧凑双栏 -->
+            <Grid x:Name="HomeView" Margin="36,24,36,24">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.15*"/>
+                    <ColumnDefinition Width="1*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 左列：时钟 + 日期 + 专注语卡片 + 快捷入口（紧凑分组，消除空洞感） -->
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
+                    <TextBlock x:Name="BigClock" Text="00:00"
+                               FontSize="72" FontWeight="Light" FontFamily="Consolas"
+                               Foreground="#F0F4FF" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="ClockDate" Text="—" FontSize="15" HorizontalAlignment="Center"
+                               Margin="0,0,0,18" Foreground="#9AA0A6"/>
+                    <!-- 专注语卡片（金色引言，桌面番茄钟同款语言） -->
+                    <Border Background="#333842" CornerRadius="10" BorderBrush="#4A505A" BorderThickness="1"
+                            Padding="20,14" Margin="0,0,0,22" MaxWidth="440">
+                        <TextBlock x:Name="FocusQuote" Text="专注当下这一件事，直到它完成。"
+                                   FontSize="15" HorizontalAlignment="Center" TextWrapping="Wrap"
+                                   Foreground="#F0B429" FontStyle="Italic" TextAlignment="Center"/>
+                    </Border>
+                    <!-- 快捷入口 -->
+                    <WrapPanel HorizontalAlignment="Center">
+                        <Button Style="{StaticResource NavBtn}" Content="📂 学习文件" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Files_Click"/>
+                        <Button Style="{StaticResource NavBtn}" Content="📺 Bilibili" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Bili_Click"/>
+                        <Button Style="{StaticResource NavBtn}" Content="💬 ChatGPT" FontSize="14" Padding="18,10" Margin="4" Click="Nav_ChatGPT_Click"/>
+                        <Button Style="{StaticResource NavBtn}" Content="✦ Gemini" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Gemini_Click"/>
+                        <Button Style="{StaticResource NavBtn}" Content="◈ DeepSeek" FontSize="14" Padding="18,10" Margin="4" Click="Nav_DeepSeek_Click"/>
+                    </WrapPanel>
+                </StackPanel>
+
+                <!-- 右列：计时器卡片 + 番茄钟卡片 -->
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- 卡片1：自由计时器 -->
+                    <Border Grid.Row="0" Background="{StaticResource CardBg}" CornerRadius="14"
+                            BorderBrush="#4A505A" BorderThickness="1"
+                            Padding="24,16" Margin="0,0,0,16" HorizontalAlignment="Center" Width="320">
+                        <StackPanel>
+                            <Grid>
+                                <TextBlock Text="计时器" FontSize="13" Foreground="#9AA0A6"/>
+                                <TextBlock x:Name="TimerHint" Text="空格 开始/暂停" FontSize="11"
+                                           Foreground="#6B7076" HorizontalAlignment="Right"/>
+                            </Grid>
+                            <TextBlock x:Name="TimerBig" Text="00:00:00" FontSize="40" FontWeight="Light"
+                                       FontFamily="Consolas" HorizontalAlignment="Center" Foreground="#F0F4FF"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,0">
+                                <Button x:Name="TimerBtnToggle" Content="开始" Style="{StaticResource NavBtn}"
+                                        Padding="16,7" FontSize="12" Margin="0,0,8,0" Click="Timer_Toggle_Click"/>
+                                <Button x:Name="TimerBtnReset" Content="重置" Style="{StaticResource NavBtn}"
+                                        Padding="16,7" FontSize="12" Click="Timer_Reset_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 卡片2：番茄钟（桌面版设计：环形进度+青绿/金+模式按钮+蜂鸣） -->
+                    <Border Grid.Row="1" Background="{StaticResource CardBg}" CornerRadius="14"
+                            BorderBrush="#4A505A" BorderThickness="1"
+                            Padding="24,14" HorizontalAlignment="Center" Width="320">
+                        <local:PomodoroControl x:Name="PomoControl"/>
+                    </Border>
+                </Grid>
+            </Grid>
 
             <!-- 学习文件 -->
             <Grid x:Name="FilesView" Visibility="Collapsed" Margin="24">
@@ -135,7 +176,7 @@
                 </ScrollViewer>
             </Grid>
 
-            <!-- WebView 宿主（WindowsFormsHost 承载 WebView2 WinForms 控件） -->
+            <!-- WebView 宿主 -->
             <Grid x:Name="WebHost" Visibility="Collapsed">
                 <WindowsFormsHost x:Name="WfHost" Background="Transparent"/>
             </Grid>
