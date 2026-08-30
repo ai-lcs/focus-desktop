@@ -22,6 +22,7 @@ public class AppSettings
     {
         "chatgpt.com",
         "gemini.google.com",
+        "aistudio.google.com",
         "deepseek.com",
         "bilibili.com",
     };

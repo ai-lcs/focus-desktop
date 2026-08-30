@@ -26,6 +26,8 @@ public static class UrlSelfTest
         Check("https://space.bilibili.com/12345", true);                   // 子域
         Check("https://chatgpt.com/c/abc-123", true);                      // 会话页
         Check("https://gemini.google.com/app", true);                      // Gemini 应用页
+        Check("https://aistudio.google.com/prompts/new_chat", true);       // Google AI Studio（用户实际入口）
+        Check("https://aistudio.google.com/apps", true);                   // AI Studio 应用页
         Check("https://chat.deepseek.com/a/chat", true);                   // DeepSeek 会话
         Check("https://accounts.google.com/o/oauth2/auth?x=1", true);      // OAuth 登录
         Check("https://passport.bilibili.com/login", true);                // B站扫码登录

@@ -131,7 +131,7 @@ public partial class MainWindow : Window
 
                 await _web.CreateTabAsync("bili", "Bilibili", "https://www.bilibili.com", _hostPanel);
                 await _web.CreateTabAsync("chatgpt", "ChatGPT", "https://chatgpt.com", _hostPanel);
-                await _web.CreateTabAsync("gemini", "Gemini", "https://gemini.google.com", _hostPanel);
+                await _web.CreateTabAsync("gemini", "Gemini", "https://aistudio.google.com", _hostPanel);
                 await _web.CreateTabAsync("deepseek", "DeepSeek", "https://chat.deepseek.com", _hostPanel);
                 App.SmokeLog("smoke: 4 web tabs created");
 
@@ -166,7 +166,7 @@ public partial class MainWindow : Window
 
             await _web.CreateTabAsync("bili", "Bilibili", "https://www.bilibili.com", _hostPanel);
             await _web.CreateTabAsync("chatgpt", "ChatGPT", "https://chatgpt.com", _hostPanel);
-            await _web.CreateTabAsync("gemini", "Gemini", "https://gemini.google.com", _hostPanel);
+            await _web.CreateTabAsync("gemini", "Gemini", "https://aistudio.google.com", _hostPanel);
             await _web.CreateTabAsync("deepseek", "DeepSeek", "https://chat.deepseek.com", _hostPanel);
             await _web.CreateTabAsync("pdf", "PDF", "", _hostPanel);
 

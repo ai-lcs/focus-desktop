@@ -54,7 +54,7 @@ release/focus-desktop/   ← 自包含版（免装 .NET，双击即用）
 {
   "studyFolder": "D:\\Study",                        // 学习目录
   "exitPhrase": "我确实有事需要离开这个环境，我要马上回来。",  // 退出语（可改）
-  "whitelist": ["chatgpt.com", "gemini.google.com", "deepseek.com", "bilibili.com"],
+  "whitelist": ["chatgpt.com", "gemini.google.com", "aistudio.google.com", "deepseek.com", "bilibili.com"],
   "loginDomains": ["accounts.google.com", "auth.openai.com", "cdn.auth0.com",
                     "passport.bilibili.com", "login.live.com"]  // 登录跳转放行域
 }
