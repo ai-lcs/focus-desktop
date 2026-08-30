@@ -1,5 +1,0 @@
-click 45: True
-click start: True
-shot saved
-END
-DONE

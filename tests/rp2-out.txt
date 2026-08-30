@@ -1,6 +1,0 @@
-clicked 45
-start buttons found: 4
-clicked start at 1895,1220
-shot saved
-END
-DONE
