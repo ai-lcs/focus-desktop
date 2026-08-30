@@ -58,7 +58,7 @@
                         <Slider x:Name="VolumeSlider" Width="80" Minimum="0" Maximum="100"
                                 VerticalAlignment="Center" Style="{StaticResource SlimSlider}"
                                 ValueChanged="VolumeSlider_ValueChanged"/>
-                        <TextBlock x:Name="VolumePct" Text="50" FontSize="11" Width="22" TextAlignment="Right"
+                        <TextBlock x:Name="VolumePct" Text="50" FontSize="11" MinWidth="24" TextAlignment="Right"
                                    VerticalAlignment="Center" Margin="6,0,2,0"
                                    Foreground="{DynamicResource MutedBrush}"/>
                     </StackPanel>
@@ -180,9 +180,26 @@
                     <Button Content="📁 选择文件夹" Grid.Column="4" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13" Margin="8,0,0,0"
                             Click="Files_Choose_Click"/>
                 </Grid>
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="FileList"/>
-                </ScrollViewer>
+                <ListBox x:Name="FileList" Grid.Row="1" Background="Transparent"
+                         BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingStackPanel.IsVirtualizing="True"
+                         VirtualizingStackPanel.VirtualizationMode="Recycling">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="Margin" Value="0"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <ContentPresenter/>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                </ListBox>
             </Grid>
 
             <!-- WebView 宿主 -->

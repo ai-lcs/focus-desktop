@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Windows.Controls.Primitives;
 using focus_desktop.Services;
 using Forms = System.Windows.Forms;
 using WpfButton = System.Windows.Controls.Button;
@@ -353,7 +354,96 @@ public partial class MainWindow : Window
                 TabBar.Children.Add(btn);
             }
         }
+
+        // "+" 新建 Tab（浏览器习惯：GPT 可开两个、网课可开三个）
+        var add = new WpfButton
+        {
+            Content = "+",
+            FontSize = 16,
+            Padding = new Thickness(10, 2, 10, 2),
+            Margin = new Thickness(6, 0, 0, 0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Foreground = (Brush)FindResource("MutedBrush"),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Focusable = false,
+        };
+        System.Windows.Automation.AutomationProperties.SetAutomationId(add, "tab_add");
+        add.Click += (_, _) => ShowNewTabMenu();
+        TabBar.Children.Add(add);
+
         ActivateTab("home");
+    }
+
+    /// <summary>四站快捷定义（"+"菜单与快捷入口共用）。</summary>
+    private static readonly (string Id, string Title, string Url)[] QuickSites =
+    {
+        ("bili", "Bilibili", "https://www.bilibili.com"),
+        ("chatgpt", "ChatGPT", "https://chatgpt.com"),
+        ("gemini", "Gemini", "https://aistudio.google.com"),
+        ("deepseek", "DeepSeek", "https://chat.deepseek.com"),
+    };
+
+    /// <summary>"+"新建 Tab：弹出四站选择浮层（点站名开新 Tab）。</summary>
+    private void ShowNewTabMenu()
+    {
+        var menu = new Popup
+        {
+            PlacementTarget = TabBar,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+            StaysOpen = false,
+            AllowsTransparency = true,
+        };
+        var list = new Border
+        {
+            Background = (Brush)FindResource("PanelBrush"),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(6),
+        };
+        var sp = new StackPanel();
+        foreach (var site in QuickSites)
+        {
+            var s = site;
+            var item = new WpfButton
+            {
+                Content = $"{s.Title}  新标签页",
+                FontSize = 13,
+                Padding = new Thickness(14, 8, 14, 8),
+                Margin = new Thickness(0, 1, 0, 1),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = (Brush)FindResource("FgBrush"),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            item.Click += (_, _) =>
+            {
+                menu.IsOpen = false;
+                _ = OpenNewSiteTabAsync(s.Id, s.Title, s.Url);
+            };
+            sp.Children.Add(item);
+        }
+        list.Child = sp;
+        menu.Child = list;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>开一个新站 Tab（同站可多开：GPT 两个、B站 三个…）。</summary>
+    private async Task OpenNewSiteTabAsync(string baseId, string title, string url)
+    {
+        if (_web == null || _hostPanel == null) return;
+        // 找未占用的 id：bili / bili-2 / bili-3 …
+        var id = baseId;
+        var n = 1;
+        while (_web.Tabs.Any(t => t.Id == id))
+            id = $"{baseId}-{++n}";
+        var tabTitle = n == 1 ? title : $"{title} {n}";
+        _web.RegisterTab(id, tabTitle, url);
+        AddWebTabButton(id, tabTitle);
+        await _web.EnsureTabAsync(id, _hostPanel);
+        ActivateTab(id);
     }
 
     /// <summary>注册新 Tab 并立即显示在 Tab 条（PDF 多开用）。</summary>
@@ -392,7 +482,7 @@ public partial class MainWindow : Window
             var active = tid == _activeTab;
             if (btn.Content is not Border bg) continue;
             bg.Background = active
-                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x3B, 0x41, 0x4B))
+                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x4A, 0x52, 0x5E))
                 : Brushes.Transparent;
             if (bg.Child is System.Windows.Controls.Grid g
                 && g.Children.Count == 2
@@ -400,6 +490,7 @@ public partial class MainWindow : Window
                 && g.Children[1] is Border underline)
             {
                 text.Foreground = active ? (Brush)FindResource("FgBrush") : (Brush)FindResource("MutedBrush");
+                text.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
                 underline.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
             }
         }
@@ -445,10 +536,18 @@ public partial class MainWindow : Window
         ActivateTab("files");
         RenderFiles();
     }
-    private void Nav_Bili_Click(object sender, RoutedEventArgs e) => ActivateTab("bili");
-    private void Nav_ChatGPT_Click(object sender, RoutedEventArgs e) => ActivateTab("chatgpt");
-    private void Nav_Gemini_Click(object sender, RoutedEventArgs e) => ActivateTab("gemini");
-    private void Nav_DeepSeek_Click(object sender, RoutedEventArgs e) => ActivateTab("deepseek");
+    private void Nav_Bili_Click(object sender, RoutedEventArgs e) => NavOrOpen(0);
+    private void Nav_ChatGPT_Click(object sender, RoutedEventArgs e) => NavOrOpen(1);
+    private void Nav_Gemini_Click(object sender, RoutedEventArgs e) => NavOrOpen(2);
+    private void Nav_DeepSeek_Click(object sender, RoutedEventArgs e) => NavOrOpen(3);
+
+    /// <summary>快捷入口：Tab 在就直接切，被关了就新开一个（浏览器习惯）。</summary>
+    private void NavOrOpen(int siteIndex)
+    {
+        var (id, title, url) = QuickSites[siteIndex];
+        if (_web != null && _web.Tabs.Any(t => t.Id == id)) ActivateTab(id);
+        else _ = OpenNewSiteTabAsync(id, title, url);
+    }
 
     // ---------------- 自由计时器 ----------------
 
@@ -538,12 +637,15 @@ public partial class MainWindow : Window
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => RenderFiles();
 
-    private void RenderFiles()
+    private int _filesRenderSeq; // 异步枚举版本号：旧结果到达时丢弃（防搜索键连打错位）
+
+    private async void RenderFiles()
     {
-        FileList.Items.Clear();
+        var seq = ++_filesRenderSeq;
         FilesPath.Text = _currentDir;
         if (!Directory.Exists(_filesRoot))
         {
+            FileList.Items.Clear();
             FileList.Items.Add(new TextBlock
             {
                 Text = $"学习目录不存在：{_filesRoot}\n请点右上「选择文件夹」重新指定。",
@@ -553,43 +655,88 @@ public partial class MainWindow : Window
             });
             return;
         }
+
         var keyword = SearchBox.Text.Trim();
+        var dir = _currentDir;
+
+        // 列表区立即显示"读取中"（不阻塞 UI 线程）
+        FileList.Items.Clear();
+        var loading = new TextBlock { Text = "读取中…", Foreground = (Brush)FindResource("MutedBrush"), FontSize = 13, Margin = new Thickness(4, 6, 0, 0) };
+        FileList.Items.Add(loading);
+
+        (List<(string Icon, string Name, string Path, bool IsDir)> rows, string? err, bool truncated) result;
         try
         {
-            var dirs = Directory.EnumerateDirectories(_currentDir);
-            var files = Directory.EnumerateFiles(_currentDir);
-            if (keyword.Length > 0)
+            // 目录枚举移后台线程（大目录/网络盘不卡 UI）；只算数据，控件回 UI 线程建
+            result = await System.Threading.Tasks.Task.Run(() =>
             {
-                dirs = dirs.Where(d => Path.GetFileName(d).Contains(keyword, StringComparison.OrdinalIgnoreCase));
-                files = files.Where(f => Path.GetFileName(f).Contains(keyword, StringComparison.OrdinalIgnoreCase));
-            }
-
-            foreach (var d in dirs.OrderBy(d => Path.GetFileName(d)))
-            {
-                var item = MakeFileItem("📁", Path.GetFileName(d), () => { _currentDir = d; RenderFiles(); });
-                FileList.Items.Add(item);
-            }
-            foreach (var f in files.OrderBy(f => Path.GetFileName(f)))
-            {
-                var ext = Path.GetExtension(f).ToLowerInvariant();
-                var icon = ext switch
+                var rows = new List<(string, string, string, bool)>();
+                IEnumerable<string> dEnum, fEnum;
+                try
                 {
-                    ".pdf" => "📕",
-                    ".doc" or ".docx" or ".wps" => "📘",
-                    ".ppt" or ".pptx" => "📙",
-                    ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" => "🖼️",
-                    ".txt" or ".md" => "📄",
-                    _ => "📄",
-                };
-                var path = f;
-                var item = MakeFileItem(icon, Path.GetFileName(f), () => OpenFile(path));
-                FileList.Items.Add(item);
-            }
+                    dEnum = Directory.EnumerateDirectories(dir);
+                    fEnum = Directory.EnumerateFiles(dir);
+                }
+                catch (Exception ex)
+                {
+                    return (rows, ex.Message, false);
+                }
+                if (keyword.Length > 0)
+                {
+                    dEnum = dEnum.Where(d => Path.GetFileName(d).Contains(keyword, StringComparison.OrdinalIgnoreCase));
+                    fEnum = fEnum.Where(f => Path.GetFileName(f).Contains(keyword, StringComparison.OrdinalIgnoreCase));
+                }
+
+                const int cap = 2000;
+                var dirList = dEnum.OrderBy(d => Path.GetFileName(d)).Take(cap + 1).ToList();
+                var fileList = fEnum.OrderBy(f => Path.GetFileName(f)).Take(cap + 1).ToList();
+                var truncated = dirList.Count + fileList.Count > cap;
+
+                foreach (var d in dirList.Take(cap))
+                    rows.Add(("📁", Path.GetFileName(d), d, true));
+                foreach (var f in fileList.Take(cap))
+                {
+                    var ext = Path.GetExtension(f).ToLowerInvariant();
+                    var icon = ext switch
+                    {
+                        ".pdf" => "📕",
+                        ".doc" or ".docx" or ".wps" => "📘",
+                        ".ppt" or ".pptx" => "📙",
+                        ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" => "🖼️",
+                        ".txt" or ".md" => "📄",
+                        _ => "📄",
+                    };
+                    rows.Add((icon, Path.GetFileName(f), f, false));
+                }
+                return (rows, (string?)null, truncated);
+            });
         }
         catch (Exception ex)
         {
+            if (seq != _filesRenderSeq) return;
+            FileList.Items.Clear();
             FileList.Items.Add(new TextBlock { Text = $"无法读取目录：{ex.Message}", Foreground = (Brush)FindResource("DangerBrush") });
+            return;
         }
+
+        // 旧结果到达：丢弃（用户已切目录/继续输入）
+        if (seq != _filesRenderSeq) return;
+        FileList.Items.Clear();
+        if (result.err != null)
+        {
+            FileList.Items.Add(new TextBlock { Text = $"无法读取目录：{result.err}", Foreground = (Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap });
+            return;
+        }
+        foreach (var (icon, name, path, isDir) in result.rows)
+        {
+            var p = path;
+            var item = isDir
+                ? MakeFileItem(icon, name, () => { _currentDir = p; RenderFiles(); })
+                : MakeFileItem(icon, name, () => OpenFile(p));
+            FileList.Items.Add(item);
+        }
+        if (result.truncated)
+            FileList.Items.Add(new TextBlock { Text = "… 条目过多，仅显示前 2000 项（可用搜索框过滤）", Foreground = (Brush)FindResource("MutedBrush"), FontSize = 12, Margin = new Thickness(4, 8, 0, 0) });
     }
 
     private FrameworkElement MakeFileItem(string icon, string name, Action open)
