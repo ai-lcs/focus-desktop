@@ -14,7 +14,7 @@ public class AppSettings
     public string StudyFolder { get; set; } = @"D:\Study";
 
     [JsonPropertyName("exitPhrase")]
-    public string ExitPhrase { get; set; } = "我确实有事需要离开这个环境，我要马上回来。";
+    public string ExitPhrase { get; set; } = "我发誓我确实有事需要离开这个环境，我要马上回来。";
 
     /// <summary>顶层导航白名单（站点主域）。</summary>
     [JsonPropertyName("whitelist")]
@@ -53,7 +53,7 @@ public class AppSettings
 
     /// <summary>首页专注语（一句让自己专注的话，config 可改）。</summary>
     [JsonPropertyName("focusQuote")]
-    public string FocusQuote { get; set; } = "专注当下这一件事，直到它完成。";
+    public string FocusQuote { get; set; } = "所有命运的馈赠，\n都已在暗处标好了价格";
 
     public static bool Exists() => File.Exists(Paths.ConfigFile);
 

@@ -2,7 +2,7 @@
 PASS  全屏铺满主屏 (1280 x 800，屏幕 1280x800)
 PASS  任务栏隐藏
 PASS  Win 键被拦（开始菜单未弹出）
-PASS  Alt+Tab 被拦（前台未切换: chrome:35772）
+PASS  Alt+Tab 被拦（前台未切换: focus-desktop:32464）
 PASS  Alt+F4 被拦（进程存活）
 PASS  强杀后脏标志残留 true（自愈依据）
 PASS  启动自愈触发（self-heal 日志存在）

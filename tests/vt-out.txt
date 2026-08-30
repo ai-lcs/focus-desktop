@@ -1,0 +1,13 @@
+PASS main window
+FAIL tab_home missing
+FAIL tab_files missing
+FAIL tab_bili missing
+FAIL tab_chatgpt missing
+FAIL tab_gemini missing
+FAIL tab_deepseek missing
+FAIL AddTabButton missing
+SKIP add missing
+FAIL pomo label missing
+FAIL pomo time missing
+FAIL volume pct missing
+END

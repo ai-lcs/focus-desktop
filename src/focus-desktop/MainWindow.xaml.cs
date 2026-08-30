@@ -123,6 +123,26 @@ public partial class MainWindow : Window
         VolumeSlider.Value = VolumeHelper.Get();
         VolumePct.Text = VolumeHelper.Get().ToString();
         MuteButton.Content = VolumeHelper.IsMuted() ? SPK_MUTE : SPK;
+
+        // 拖拽会话：按住滑杆期间暂停回读（防打架）
+        VolumeSlider.PreviewMouseLeftButtonDown += (_, _) => _volumeDragging = true;
+        VolumeSlider.PreviewMouseLeftButtonUp += (_, _) => _volumeDragging = false;
+        VolumeSlider.LostMouseCapture += (_, _) => _volumeDragging = false;
+
+        // 音量同步轮询：系统音量被外部改变（键盘/任务栏滑杆）时刷新 UI。
+        // _volumeDragging 标志防打架：用户拖我们的滑杆时跳过回读。
+        var volTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        volTimer.Tick += (_, _) =>
+        {
+            if (_volumeDragging) return;
+            var sys = VolumeHelper.Get();
+            if (Math.Abs(sys - (int)VolumeSlider.Value) >= 1)
+                VolumeSlider.Value = sys; // 触发 ValueChanged → 同步百分比/图标
+            var m = VolumeHelper.IsMuted();
+            var wantIcon = m ? SPK_MUTE : (sys > 0 ? SPK : SPK_MUTE);
+            if ((string)MuteButton.Content != wantIcon) MuteButton.Content = wantIcon;
+        };
+        volTimer.Start();
     }
 
     private async Task InitAsync()
@@ -375,6 +395,8 @@ public partial class MainWindow : Window
         ActivateTab("home");
     }
 
+    private void AddTabButton_Click(object sender, RoutedEventArgs e) => ShowNewTabMenu();
+
     /// <summary>四站快捷定义（"+"菜单与快捷入口共用）。</summary>
     private static readonly (string Id, string Title, string Url)[] QuickSites =
     {
@@ -499,12 +521,11 @@ public partial class MainWindow : Window
     private async void ActivateTab(string id)
     {
         _activeTab = id;
-        HomeView.Visibility = id == "home" ? Visibility.Visible : Visibility.Collapsed;
-        FilesView.Visibility = id == "files" ? Visibility.Visible : Visibility.Collapsed;
-        var isWeb = _web != null && _web.Tabs.Any(t => t.Id == id);
-        WebHost.Visibility = isWeb ? Visibility.Visible : Visibility.Collapsed;
+        ApplyTabVisibility(id);
 
-        // 懒加载：首次激活才真正创建 WebView2 控件
+        // 懒加载：首次激活才真正创建 WebView2 控件。
+        // await 期间用户可能又点了别的 Tab —— 完成后重断言，谁最后点谁生效（竞态防御）。
+        var isWeb = _web != null && _web.Tabs.Any(t => t.Id == id);
         if (isWeb && _web != null && _hostPanel != null)
         {
             var info = _web.Tabs.First(t => t.Id == id);
@@ -520,13 +541,23 @@ public partial class MainWindow : Window
                     ShowBlocked($"网页组件启动失败：{ex.Message}");
                     CrashReporter.Write(ex, $"lazy-tab-{id}");
                 }
+                if (_activeTab != id) return; // 已切走：不动可见性（另一次 ActivateTab 负责最终状态）
+                OnTabTitleChanged(id, _web.Tabs.First(t => t.Id == id).Title); // 恢复标题
             }
         }
 
         if (isWeb) _everActivated.Add(id);
-        if (isWeb) _everActivated.Add(id);
         _web?.Activate(id);
         RefreshTabVisuals();
+    }
+
+    /// <summary>可见性只在主线程同步设置（await 前调用），竞态下由最后点击者决定。</summary>
+    private void ApplyTabVisibility(string id)
+    {
+        HomeView.Visibility = id == "home" ? Visibility.Visible : Visibility.Collapsed;
+        FilesView.Visibility = id == "files" ? Visibility.Visible : Visibility.Collapsed;
+        var isWeb = _web != null && _web.Tabs.Any(t => t.Id == id);
+        WebHost.Visibility = isWeb ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---------------- 导航（首页按钮也走 ActivateTab） ----------------
@@ -800,6 +831,12 @@ public partial class MainWindow : Window
             if (e.NewValue > 0) MuteButton.Content = SPK;
         }
     }
+
+    private bool _volumeDragging;
+
+    // 拖拽起止（Thumb 事件在模板内，用滑杆的鼠标按下/抬起近似）
+    // PreviewMouseDown/Up 挂在滑杆上：按下即视为拖拽会话开始
+    
 
     /// <summary>静音/恢复（记住静音前音量）。</summary>
     private void MuteButton_Click(object sender, RoutedEventArgs e)

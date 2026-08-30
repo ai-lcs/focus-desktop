@@ -31,12 +31,12 @@ function FindById($id) {
 }
 
 # 1. base tabs + add button
-foreach ($tid in @("tab_home","tab_files","tab_bili","tab_chatgpt","tab_gemini","tab_deepseek","tab_add")) {
+foreach ($tid in @("tab_home","tab_files","tab_bili","tab_chatgpt","tab_gemini","tab_deepseek","AddTabButton")) {
     if (FindById($tid) -ne $null) { Log "PASS $tid" } else { Log "FAIL $tid missing" }
 }
 
 # 2. click + -> menu -> click ChatGPT item -> tab_chatgpt-2 appears
-$add = FindById("tab_add")
+$add = FindById("AddTabButton")
 if ($add) {
     $add.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 700
@@ -60,6 +60,7 @@ $p1 = FindByName("番茄钟")
 $p2 = FindByName("25:00")
 if ($p1 -ne $null) { Log "PASS pomo label" } else { Log "FAIL pomo label missing" }
 if ($p2 -ne $null) { Log "PASS pomo time 25:00" } else { Log "FAIL pomo time missing" }
+if (FindByName("番茄钟 · 小憩") -ne $null) { Log "FAIL old hint text still present" }
 
 # 4. volume pct
 $vp = FindByName("50")

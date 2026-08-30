@@ -9,9 +9,9 @@ using SwmColor = System.Windows.Media.Color;
 namespace focus_desktop;
 
 /// <summary>
-/// 番茄钟卡片内容（桌面番茄钟.pyw 设计语言移植：环形进度+青绿/金配色+模式按钮+蜂鸣）。
-/// 视觉审查 v2（2026-08-30）：环加大加粗、文字三级分层、模式按钮贴近环、
-/// 加标题行与计时器卡统一、默认 25 分钟补入模式组。纯代码构建（无 XAML）。
+/// 番茄钟卡片内容（桌面番茄钟.pyw 设计语言：环形进度+青绿/金配色+蜂鸣）。
+/// v0.3.2 简化（用户指示"不要加文字"）：环内只留倒计时数字，阶段用弧颜色表达；
+/// 修复：近 360° 退化弧（ArcSegment 起终点重合 → 未定义行为 → 巨大圆环渲染异常）。
 /// </summary>
 public class PomodoroControl : System.Windows.Controls.UserControl
 {
@@ -30,25 +30,15 @@ public class PomodoroControl : System.Windows.Controls.UserControl
     private readonly PomodoroService _svc = new();
     private readonly DispatcherTimer _uiTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
-    // 环形画布（220px，卡片主体）
-    private readonly Canvas _ringCanvas = new() { Width = 240, Height = 240 };
-    private System.Windows.Shapes.Path? _arcPath; // 当前进度弧（独立引用；绝不能按索引删子元素——v0.2.0 文字被吃 bug）
-    private Ellipse? _goldRing; // 装饰金环（仅运行时显示）
+    // 环形画布 200px；ClipToBounds 防任何绘制异常溢出卡片
+    private readonly Canvas _ringCanvas = new() { Width = 200, Height = 200, ClipToBounds = true };
+    private System.Windows.Shapes.Path? _arcPath; // 独立引用管理弧（绝不按索引删子元素）
 
-    private readonly TextBlock _phaseLabel = new()
-    {
-        FontSize = 15, FontWeight = FontWeights.Bold,
-        TextAlignment = TextAlignment.Center, Width = 240, Foreground = Muted,
-    };
     private readonly TextBlock _timeText = new()
     {
-        FontSize = 38, FontWeight = FontWeights.Light,
+        FontSize = 34, FontWeight = FontWeights.Light,
         FontFamily = new System.Windows.Media.FontFamily("Consolas"),
-        Foreground = White, TextAlignment = TextAlignment.Center, Width = 240,
-    };
-    private readonly TextBlock _statusText = new()
-    {
-        FontSize = 12.5, TextAlignment = TextAlignment.Center, Width = 240, Foreground = Muted,
+        Foreground = White, TextAlignment = TextAlignment.Center, Width = 200,
     };
     private readonly Dictionary<int, Button> _modeBtns = new();
     private Button _btnStart = null!, _btnPause = null!, _btnReset = null!;
@@ -83,11 +73,11 @@ public class PomodoroControl : System.Windows.Controls.UserControl
     private void BuildUi()
     {
         Background = Brushes.Transparent;
-        Width = 360;
+        Width = 320;
 
         var root = new StackPanel();
 
-        // 标题行（与计时器卡统一：左标题 + 右提示）
+        // 标题行（与计时器卡统一）
         var titleRow = new Grid();
         titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -99,28 +89,20 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         titleRow.Children.Add(hint);
         root.Children.Add(titleRow);
 
-        // 环形进度（加大加粗：220 画布 / 轨道 stroke 13 / 金色装饰外环）
+        // 环形进度：轨道 12px；环内只有倒计时（用户指示）
         _ringCanvas.HorizontalAlignment = HorizontalAlignment.Center;
         _ringCanvas.Margin = new Thickness(0, 14, 0, 10);
 
-        var track = new Ellipse { Stroke = Track, StrokeThickness = 15, Width = 200, Height = 200 };
-        Canvas.SetLeft(track, 20); Canvas.SetTop(track, 20);
+        var track = new Ellipse { Stroke = Track, StrokeThickness = 12, Width = 168, Height = 168 };
+        Canvas.SetLeft(track, 16); Canvas.SetTop(track, 16);
         _ringCanvas.Children.Add(track);
-        // 金色装饰环：仅运行时显示（idle 显示会被误读为进度）
-        _goldRing = new Ellipse { Stroke = Gold, StrokeThickness = 1.5, Opacity = 0.35, Width = 232, Height = 232, Visibility = Visibility.Collapsed };
-        Canvas.SetLeft(_goldRing, 4); Canvas.SetTop(_goldRing, 4);
-        _ringCanvas.Children.Add(_goldRing);
 
-        Canvas.SetLeft(_phaseLabel, 0); Canvas.SetTop(_phaseLabel, 62);
-        _ringCanvas.Children.Add(_phaseLabel);
-        Canvas.SetLeft(_timeText, 0); Canvas.SetTop(_timeText, 90);
+        Canvas.SetLeft(_timeText, 0); Canvas.SetTop(_timeText, 76);
         _ringCanvas.Children.Add(_timeText);
-        Canvas.SetLeft(_statusText, 0); Canvas.SetTop(_statusText, 148);
-        _ringCanvas.Children.Add(_statusText);
 
         root.Children.Add(_ringCanvas);
 
-        // 模式按钮 15/25/30/45/60（贴近环，归属明确）
+        // 模式按钮 15/25/30/45/60
         var modeRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) };
         foreach (var m in Modes)
         {
@@ -141,7 +123,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         }
         root.Children.Add(modeRow);
 
-        // 操作按钮：开始 / 暂停 / 重置
+        // 操作按钮
         var actRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         _btnStart = MkBtn("开始", (_, _) => Start(), Teal);
         _btnPause = MkBtn("暂停", (_, _) => Pause(), BtnBg);
@@ -176,7 +158,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
 
     private void SetMode(int minutes)
     {
-        if (_svc.IsRunning) return; // 运行中不许改模式（桌面版同款规则）
+        if (_svc.IsRunning) return;
         _svc.WorkMinutes = minutes;
         _svc.Reset();
         _lastFinished = false;
@@ -184,11 +166,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         Redraw();
     }
 
-    private void Start()
-    {
-        _svc.Start();
-        Redraw();
-    }
+    private void Start() { _svc.Start(); Redraw(); }
 
     private void Pause()
     {
@@ -196,12 +174,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         Redraw();
     }
 
-    private void Reset()
-    {
-        _svc.Reset();
-        _lastFinished = false;
-        Redraw();
-    }
+    private void Reset() { _svc.Reset(); _lastFinished = false; Redraw(); }
 
     // ---------------- 绘制 ----------------
 
@@ -212,27 +185,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
             ? TimeSpan.FromMinutes(_svc.WorkMinutes).ToString(@"mm\:ss")
             : remain.ToString(@"mm\:ss");
 
-        // 阶段标签（环内顶部）：Idle=番茄钟 / Work=专注 / Break=休息 —— 一眼看出在哪个阶段
-        var (phaseName, phaseBrush) = _svc.CurrentPhase switch
-        {
-            PomodoroService.Phase.Idle => ("番茄钟", Muted),
-            PomodoroService.Phase.Work => ("专注", TealHover),
-            _ => ("休息", Gold),
-        };
-        var paused = _svc.CurrentPhase != PomodoroService.Phase.Idle && !_svc.IsRunning;
-        _phaseLabel.Text = paused ? $"{phaseName} · 已暂停" : phaseName;
-        _phaseLabel.Foreground = paused ? Blue : phaseBrush;
-
-        // 状态行（环内底部）：idle 显示所选模式，运行时显示轮数+下一步
-        string status;
-        if (_svc.CurrentPhase == PomodoroService.Phase.Idle)
-            status = $"{_svc.WorkMinutes} 分钟 · 小憩 {_svc.ShortBreakMinutes} · 长休 {_svc.LongBreakMinutes} 分";
-        else if (_svc.CompletedCycles > 0)
-            status = $"第 {_svc.CompletedCycles} 轮 · 接下来：{(_svc.CurrentPhase == PomodoroService.Phase.Work ? "休息" : "专注")}";
-        else
-            status = "完成后自动进入休息";
-        _statusText.Text = status;
-        _statusText.Foreground = paused ? Blue : Muted;
+        // 阶段只通过弧颜色表达：专注=青绿 休息=金 暂停=蓝（无文字标签）
 
         // 按钮状态机：Idle=[开始] Running=[暂停+重置] Paused=[继续+重置]
         var idle = _svc.CurrentPhase == PomodoroService.Phase.Idle;
@@ -244,10 +197,8 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         StyleModeButtons();
         StyleActionButtons();
 
-        // 环形进度弧
         DrawArc(remain);
 
-        // 完成检测（阶段刚切换到休息 = 一个专注段结束）
         if (_svc.CurrentPhase is PomodoroService.Phase.ShortBreak or PomodoroService.Phase.LongBreak
             && !_lastFinished && _svc.CompletedCycles > 0)
         {
@@ -262,29 +213,41 @@ public class PomodoroControl : System.Windows.Controls.UserControl
 
     private void DrawArc(TimeSpan remain)
     {
-        // 只移除上一条弧（独立引用）；环内文字块绝不按索引删 —— v0.2.0 曾因此环中心永远空白
+        // 独立引用删旧弧（绝不按索引删子元素——v0.2.0 文字被吃 bug）
         if (_arcPath != null)
         {
             _ringCanvas.Children.Remove(_arcPath);
             _arcPath = null;
         }
 
-        _goldRing!.Visibility = _svc.CurrentPhase == PomodoroService.Phase.Idle
-            ? Visibility.Collapsed : Visibility.Visible;
-
         if (_svc.CurrentPhase == PomodoroService.Phase.Idle || _svc.CurrentPhaseMinutes <= 0) return;
 
         var total = TimeSpan.FromMinutes(_svc.CurrentPhaseMinutes);
         var ratio = total > TimeSpan.Zero ? remain / total : 0;
         ratio = Math.Max(0, Math.Min(1.0, ratio));
-        if (ratio <= 0) return;
 
-        // 阶段变色：专注=青绿 休息=金 暂停=蓝
+        // 防退化弧：ratio≈1（刚启动）或 ≈0（刚结束）时起终点几乎重合，
+        // ArcSegment + large-arc 行为未定义 → 曾渲染出覆盖两张卡片的巨大圆环。
+        // 近整圆画完整 EllipseGeometry；近零直接不画。
         var color = !_svc.IsRunning ? Blue
             : _svc.CurrentPhase == PomodoroService.Phase.Work ? TealHover
             : Gold;
 
-        var cx = 120.0; var cy = 120.0; var R = 100.0;
+        var cx = 100.0; var cy = 100.0; var R = 84.0;
+
+        if (ratio > 0.985)
+        {
+            var full = new Path
+            {
+                Stroke = color, StrokeThickness = 12,
+                Data = new EllipseGeometry(new System.Windows.Point(cx, cy), R, R),
+            };
+            _arcPath = full;
+            _ringCanvas.Children.Add(full);
+            return;
+        }
+        if (ratio <= 0.005) return;
+
         var angle = -ratio * 360.0; // 顺时针（y 向下坐标系）
         var rad = angle * Math.PI / 180.0;
         var start = new System.Windows.Point(cx, cy - R);
@@ -294,7 +257,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         var arc = new Path
         {
             Stroke = color,
-            StrokeThickness = 15,
+            StrokeThickness = 12,
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round,
             Data = new PathGeometry
@@ -332,7 +295,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
             _btnPause.Background = BtnBg;
             _btnPause.Foreground = White;
         }
-        else // paused → 继续是主键
+        else
         {
             _btnPause.Background = Teal;
             _btnPause.Foreground = Brushes.Black;
@@ -341,7 +304,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _btnReset.Foreground = new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF));
     }
 
-    /// <summary>完成一段专注：蜂鸣一声（桌面版 winsound.Beep(660,400) 的移植）。</summary>
+    /// <summary>完成一段专注：蜂鸣一声（桌面版 winsound.Beep(660,400) 移植；线程池+双 try 防无声卡崩溃）。</summary>
     private static void Beep()
     {
         try

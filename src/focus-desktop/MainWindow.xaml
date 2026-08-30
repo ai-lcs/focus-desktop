@@ -42,11 +42,21 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Tab 条（浏览器式，横向滚动） -->
-                <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
-                              VerticalScrollBarVisibility="Disabled">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
-                </ScrollViewer>
+                <!-- Tab 条（浏览器式，横向滚动）+ 固定 "+"（不随 Tab 滚动，始终最右） -->
+                <Grid Grid.Column="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
+                                  VerticalScrollBarVisibility="Disabled">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
+                    </ScrollViewer>
+                    <Button x:Name="AddTabButton" Grid.Column="1" Content="+" FontSize="16"
+                            Padding="10,2,10,3" Margin="4,0,0,0" VerticalAlignment="Center"
+                            Background="Transparent" BorderThickness="0" Cursor="Hand"
+                            Foreground="{DynamicResource MutedBrush}" Click="AddTabButton_Click"/>
+                </Grid>
 
                 <!-- 音量：胶囊（静音键 + 细滑轨 + 百分比） -->
                 <Border Grid.Column="1" Background="#1F2226" CornerRadius="14" Padding="10,4" Margin="0,0,12,0"
@@ -101,8 +111,8 @@
                     <Border Background="#333842" CornerRadius="10" BorderBrush="#4A505A" BorderThickness="1"
                             Padding="20,14" Margin="0,0,0,22" MaxWidth="440">
                         <TextBlock x:Name="FocusQuote" Text="专注当下这一件事，直到它完成。"
-                                   FontSize="15" HorizontalAlignment="Center" TextWrapping="Wrap"
-                                   Foreground="#F0B429" FontStyle="Italic" TextAlignment="Center"/>
+                                   FontSize="18" FontWeight="Medium" HorizontalAlignment="Center" TextWrapping="Wrap"
+                                   Foreground="#F5C542" TextAlignment="Center" LineHeight="30"/>
                     </Border>
                     <!-- 快捷入口 -->
                     <WrapPanel HorizontalAlignment="Center">
