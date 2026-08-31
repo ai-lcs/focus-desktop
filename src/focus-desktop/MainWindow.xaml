@@ -42,21 +42,11 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Tab 条（浏览器式，横向滚动）+ 固定 "+"（不随 Tab 滚动，始终最右） -->
-                <Grid Grid.Column="0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
-                                  VerticalScrollBarVisibility="Disabled">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
-                    </ScrollViewer>
-                    <Button x:Name="AddTabButton" Grid.Column="1" Content="+" FontSize="16"
-                            Padding="10,2,10,3" Margin="4,0,0,0" VerticalAlignment="Center"
-                            Background="Transparent" BorderThickness="0" Cursor="Hand"
-                            Foreground="{DynamicResource MutedBrush}" Click="AddTabButton_Click"/>
-                </Grid>
+                <!-- Tab 条（浏览器式：「+」在滚动流内紧跟最后一个 tab，用户 2026-08-31 指示） -->
+                <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Disabled">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
+                </ScrollViewer>
 
                 <!-- 音量：胶囊（静音键 + 细滑轨 + 百分比） -->
                 <Border Grid.Column="1" Background="#1F2226" CornerRadius="14" Padding="10,4" Margin="0,0,12,0"
@@ -113,7 +103,7 @@
                     <!-- 专注语卡片（金色引言，桌面番茄钟同款语言） -->
                     <Border Background="#333842" CornerRadius="10" BorderBrush="#4A505A" BorderThickness="1"
                             Padding="20,14" Margin="0,0,0,22" MaxWidth="440">
-                        <TextBlock x:Name="FocusQuote" Text="专注当下这一件事，直到它完成。"
+                        <TextBlock x:Name="FocusQuote" Text="你想成为怎样的人？"
                                    FontSize="18" FontWeight="Medium" HorizontalAlignment="Center" TextWrapping="Wrap"
                                    Foreground="#F5C542" TextAlignment="Center" LineHeight="30"/>
                     </Border>
@@ -220,24 +210,9 @@
             <Grid x:Name="WebHost" Visibility="Collapsed">
                 <WindowsFormsHost x:Name="WfHost" Background="Transparent"/>
             </Grid>
-        </Grid>
+            </Grid>
 
-        <!-- Tab 切换过渡遮罩：盖住 WebHost 区域，250ms 渐隐（消除"深灰等待"的卡顿观感） -->
-        <Border x:Name="SwitchMask" Grid.Row="1" Background="#23262C"
-                Opacity="0" IsHitTestVisible="False">
-            <Border.Triggers>
-                <EventTrigger RoutedEvent="Border.Loaded">
-                    <BeginStoryboard>
-                        <Storyboard>
-                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                From="0" To="0" Duration="0:0:0"/>
-                        </Storyboard>
-                    </BeginStoryboard>
-                </EventTrigger>
-            </Border.Triggers>
-        </Border>
-
-        <!-- 被拦截提示条 -->
+            <!-- 被拦截提示条 -->
         <Border x:Name="BlockedBar" Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Center"
                 Background="#5C1F1F" BorderBrush="#E5534B" BorderThickness="1" CornerRadius="6"
                 Padding="16,8" Margin="0,12,0,0" Visibility="Collapsed">

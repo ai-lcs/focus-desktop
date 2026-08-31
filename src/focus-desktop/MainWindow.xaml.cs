@@ -148,13 +148,19 @@ public partial class MainWindow : Window
         volTimer.Start();
     }
 
+    /// <summary>预热调度：启动 1.5s 后隐藏预热全部站（v0.5.2 起预热全程不可见——
+    /// 不再临时展开 WebHost，规避 19:28 视频回归的"首页上空白屏闪烁 1 秒"）。
+    /// v0.5.1：预热恢复（v0.4.1h 因坏死被砍，但砍掉后首开重站/PDF 要 3-10s 盲等——
+    /// 2026-08-31 视频里 PDF 首开 4s 黑白翻转就是此代价）。</summary>
     private async Task WarmupAfterDelayAsync()
     {
         try
         {
             await Task.Delay(1500); // 尽早开始（用户 5-7 秒就会开始点 Tab）
-            if (_web != null && _hostPanel != null)
-                await _web.WarmupAllAsync(_hostPanel);
+            if (_web == null || _hostPanel == null) return;
+            // 预热期间若用户已点开网页 tab，跳过预热（激活路径已处理/懒加载兜底）
+            if (_activeTab is not "home" and not "files") return;
+            await _web.WarmupAllAsync(_hostPanel);
         }
         catch (Exception ex)
         {
@@ -205,7 +211,6 @@ public partial class MainWindow : Window
             _web = new WebTabService();
             await _web.EnsureEnvironmentAsync();
             WebTabService.Blocked += host => Dispatcher.Invoke(() => ShowBlocked($"已拦截：{host}"));
-            WebTabService.Switched += () => Dispatcher.InvokeAsync(FlashSwitchMask);
             WebTabService.TitleChanged += OnTabTitleChanged;
             WebTabService.Recovering += () => Dispatcher.InvokeAsync(async () =>
             {
@@ -234,17 +239,18 @@ public partial class MainWindow : Window
             _web.RegisterTab("gemini", "AI Studio", "https://aistudio.google.com");
             _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
 
+            // 面板底色=主题深灰：折叠期/切换间隙露出的 WinForms 裸底色（默认
+            // SystemColors.Control=#F0F0F0）就是切换白闪的来源之一（2026-08-31 视频实锤）
+            _hostPanel.BackColor = System.Drawing.Color.FromArgb(0x23, 0x26, 0x2C);
+
             BuildTabBar();
 
-            // 后台预热（懒加载的补充）：启动 3 秒后错峰逐个建控件+导航，隐藏加载。
-            // 用户首次点击时页面已就绪 —— 消除连点四站时每个都白屏/黑屏数秒的剧烈卡顿。
-            // 与手点并发安全（EnsureTabAsync 内 _creating 去重）。
-            // 注意：必须在 UI 线程上 await（WebView2 控件创建跨线程会炸）——
-            // v0.3.3 用 ContinueWith 落在线程池 → 跨线程异常被吞 → 预热从未生效（录屏实证）。
-            // v0.4.1h：预热彻底移除——预热在 host 折叠期创建的 WebView 会坏死
-            //（bili/deepseek 恢复后永久灰屏，实测像素级证实）。回到纯懒加载：
-            // 首次点击创建+加载（有暗底与切换遮罩兜底观感），二次起瞬时切换。
-            // _ = WarmupAfterDelayAsync();
+            // 预热（v0.5.2 隐藏形态）：启动 1.5s 后错峰逐个建控件+导航，全程不可见。
+            // 首开站/PDF 时页面已就绪 —— 消除首开 3-10s 盲等（2026-08-31 视频 PDF 首开 4s 实锤）。
+            // 安全形态：控件以 Visible=false 创建（先于入宿主；坏死陷阱触发条件是
+            // 「折叠宿主内创建 visible=true 子控件」，隐藏子控件不在其列），宿主保持 Collapsed。
+            // 每站创建后 ExecuteScript 探活（防永久灰屏，失败销毁回退懒加载）。
+            _ = WarmupAfterDelayAsync();
         }
         catch (Exception ex)
         {
@@ -407,8 +413,40 @@ public partial class MainWindow : Window
             }
         }
 
-        // 注：「+」新建按钮已移至 XAML 固定位置（AddTabButton，不随 Tab 滚动）
+        // 「+」在滚动流内紧跟最后一个 tab（浏览器式，用户 2026-08-31 指示）
+        _addTabBtn = MakeAddTabButton();
+        TabBar.Children.Add(_addTabBtn);
         ActivateTab("home");
+    }
+
+    /// <summary>「+」新建按钮（TabBar 滚动流内、tab 序列末尾；无 tab_ AutomationId，
+    /// 不影响 TabOrder() 解析）。任何 tab 增删后调用 RefreshAddTabButton 保持其在末位。</summary>
+    private WpfButton? _addTabBtn;
+
+    private WpfButton MakeAddTabButton()
+    {
+        var b = new WpfButton
+        {
+            Content = "+",
+            FontSize = 16,
+            Padding = new Thickness(10, 2, 10, 3),
+            Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Foreground = (Brush)FindResource("MutedBrush"),
+        };
+        b.Click += AddTabButton_Click;
+        return b;
+    }
+
+    /// <summary>把「+」移回 TabBar 末位（tab 增/删后调用）。</summary>
+    private void RefreshAddTabButton()
+    {
+        if (_addTabBtn == null) return;
+        if (_addTabBtn.Parent is System.Windows.Controls.Panel p) p.Children.Remove(_addTabBtn);
+        TabBar.Children.Add(_addTabBtn);
     }
 
     private void AddTabButton_Click(object sender, RoutedEventArgs e) => ShowNewTabMenu();
@@ -491,6 +529,7 @@ public partial class MainWindow : Window
         var btn = MakeTabButton(id, title, true);
         _tabButtons[id] = btn;
         TabBar.Children.Add(btn);
+        RefreshAddTabButton(); // 「+」保持在末位（紧跟新 tab）
     }
 
     /// <summary>Tab 顺序（从 Tab 条 UIA id 还原）。</summary>
@@ -507,6 +546,7 @@ public partial class MainWindow : Window
         _web?.CloseTab(id);
         if (_tabButtons.Remove(id, out var btn) && btn.Parent is System.Windows.Controls.Panel parent)
             parent.Children.Remove(btn);
+        RefreshAddTabButton(); // 关 tab 后「+」仍在末位
         var next = pos >= 0 && pos < order.Count - 1 ? order[pos + 1]
                  : pos > 0 ? order[pos - 1] : "home";
         if (_activeTab == id) ActivateTab(next);
@@ -571,6 +611,9 @@ public partial class MainWindow : Window
                     && b1.Child is System.Windows.Controls.Grid g1 && g1.Children[0] is StackPanel s1
                     && s1.Children[0] is TextBlock t1)
                     t1.Text = _web.Tabs.First(t => t.Id == id).Title; // 恢复标题
+                // 创建完成：把控件提到最前（上面分支走 else 未提）。此时再闪遮罩无意义——
+                // 页面已就绪，直接显示；Switched(true) 已在上面创建期分支闪过一次作为等待反馈。
+                _web.Activate(id);
             }
         }
 
@@ -843,6 +886,11 @@ public partial class MainWindow : Window
             var name = Path.GetFileNameWithoutExtension(path);
             _web.RegisterTab(id, name, uri);
             AddWebTabButton(id, name);
+            // 关键：先把 WebHost 展开再创建——文件页态下 WebHost 是 Collapsed，
+            // 折叠期创建的 WebView 会永久坏死（v0.4.1 像素实锤，skill 有档案）。
+            // 全员常显架构下展开瞬间露的是 WinForms 面板底色（已压成深灰），
+            // 不是旧内容，随后 Activate 提到最前，无视觉突变。
+            WebHost.Visibility = Visibility.Visible;
             await _web.EnsureTabAsync(id, _hostPanel);
             ActivateTab(id);
         }
@@ -957,15 +1005,8 @@ public partial class MainWindow : Window
 
     // ---------------- 其他 ----------------
 
-    /// <summary>切换过渡遮罩：闪现（盖住 WebView 恢复期的深灰）→ 250ms 渐隐。</summary>
-    private void FlashSwitchMask()
-    {
-        SwitchMask.BeginAnimation(System.Windows.UIElement.OpacityProperty, null);
-        SwitchMask.Opacity = 1;
-        var anim = new System.Windows.Media.Animation.DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(250))
-        { BeginTime = TimeSpan.FromMilliseconds(80) };
-        SwitchMask.BeginAnimation(System.Windows.UIElement.OpacityProperty, anim);
-    }
+    // 注：v0.4.x 的 SwitchMask 过渡遮罩已删（v0.5.1）：它是 WPF 层 Border，
+    // 永远位于 WebView2 airspace HWND 之下，物理上盖不住网页——七方案实验已证其为死代码。
 
     private void ShowBlocked(string message)
     {

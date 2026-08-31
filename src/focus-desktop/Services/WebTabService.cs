@@ -79,6 +79,16 @@ public sealed class WebTabService : IDisposable
                 Dock = DockStyle.Fill,
                 // 加载期间底色=主题深灰（默认白会在暗色站点上闪白屏——录屏确认的白屏就是它）
                 DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x23, 0x26, 0x2C),
+                // 控件初始化前的 WinForms 底色也压成深灰：CoreWebView2 就绪前控件画的是
+                // BackColor（默认 SystemColors.Control=#F0F0F0）——2026-08-31 视频里
+                // PDF 首开 0.75s 纯白闪即此来源（创建期控件尚未初始化时的裸底色）
+                BackColor = System.Drawing.Color.FromArgb(0x23, 0x26, 0x2C),
+                // v0.5.2：预热/懒加载全程以「隐藏」形态创建（先于 host.Controls.Add 生效）。
+                // 修复 2026-08-31 19:28 视频回归：预热把 WebHost 设 Visible + 控件默认可见
+                // → B站白底加载页盖在首页上空 + airspace 闪烁 1 秒（用户看到"启动 1 秒大卡顿"）。
+                // 隐藏创建同时绕开旧坏死陷阱——其触发条件是「折叠宿主内创建 visible=true 子控件」，
+                // 隐藏子控件不在其列（Tauri/wry 同款形态）。首开激活由 Activate 显式 Resume+显示。
+                Visible = false,
             };
             host.Controls.Add(view);
             await view.EnsureCoreWebView2Async(_env);
@@ -100,8 +110,13 @@ public sealed class WebTabService : IDisposable
         }
     }
 
-    /// <summary>后台预热：错峰逐个创建 Tab 控件并导航（隐藏状态加载），
-    /// 用户点击时页面已就绪 —— 消除"首次点击白屏/黑屏数秒"的卡顿。</summary>
+    /// <summary>预热：全程隐藏创建（控件 Visible=false 先于入宿主、宿主保持 Collapsed）。
+    /// v0.5.1 曾把 WebHost 临时设 Visible 以规避「折叠宿主内创建坏死」——但 WebHost 在
+    /// 主 Grid 中位于 HomeView 之后 = WPF z 序最顶，展开瞬间 B站白底加载页盖住首页并产生
+    /// airspace 闪烁约 1 秒（2026-08-31 19:28 视频回归，"启动一两秒后大卡顿"）。
+    /// v0.5.2 定论：坏死陷阱的触发条件是「折叠宿主内创建 visible=true 子控件」，与宿主
+    /// 折叠无关的是控件自身的可见性——控件以隐藏形态创建即安全（Tauri/wry 同款），
+    /// 因此宿主可保持 Collapsed，预热完全不可见。首开激活由 Activate 显式 Resume+显示。</summary>
     public async Task WarmupAllAsync(System.Windows.Forms.Control host)
     {
         foreach (var t in _tabs.ToList())
@@ -109,11 +124,17 @@ public sealed class WebTabService : IDisposable
             if (t.View != null) continue;
             try
             {
-                await EnsureTabAsync(t.Id, host);
-                // 创建后隐藏：页面继续后台加载；首次切换由 Activate 显式 Resume+显示
-                //（同时避免 host 折叠期间可见 HWND 脱离折叠约束盖住 UI 的老坑）
-                t.View!.Visible = false;
-                await Task.Delay(2500); // 错峰：让上一个页面先完成关键渲染
+                // v0.5.2 关键修复：EnsureTabAsync 返回更新后的 TabInfo（_tabs 里的记录已换新），
+                // foreach 变量 t 仍是旧的（View=null）——v0.5.1 用 t.View!.Visible 抛 NRE 被吞，
+                // 导致「创建后隐藏+错峰」从未执行：4 个站以可见状态盖在首页上空狂闪 ~1.3 秒
+                // （2026-08-31 19:28 视频的启动大卡顿）。
+                // v0.5.2 同时移除 ExecuteScript 探活：其防御对象（折叠宿主内可见创建的坏死视图）
+                // 已被「隐藏创建」从根上消灭；实测它对 chatgpt/gemini 等重站 1.5s 未提交导航的
+                // 场景误报 blank → 销毁已就绪页面回退懒加载（首开又变慢），还写吓人的 crash 日志。
+                var created = await EnsureTabAsync(t.Id, host);
+                // 幂等保险（EnsureTabAsync 已以 Visible=false 隐藏创建）
+                created.View!.Visible = false;
+                await Task.Delay(1500); // 错峰 + 让页面完成关键渲染
             }
             catch { /* 单个失败不影响其余（懒加载兜底仍可用） */ }
         }
@@ -229,15 +250,27 @@ public sealed class WebTabService : IDisposable
     /// 完整实验档案（七个被否决方案 + 取证方法）见 windows-desktop-app skill：
     /// references/webview2-tab-switching.md
     /// </summary>
+    /// <summary>网页互切后触发（参数 false=已就绪页秒切），创建期切换触发 true
+    /// （首开站/PDF 的等待反馈）。v0.5.1：WPF 遮罩已删（airspace 之下无效），保留事件签名，
+    /// 让 UI 层将来可挂进度指示等真正画得上去的反馈层。</summary>
+    public static event Action<bool>? Switched;
+
+    /// <summary>
+    /// Tab 切换（v0.5.1：网页间「全员常显 + WinForms z 序」；非网页目标不再冻结 WebView）。
+    ///
+    /// 两处关键修正（2026-08-31 视频逐帧取证定罪）：
+    /// ① 目标为首页/文件时旧版把所有 WebView Visible=false —— 重新触发 Chromium 挂起 +
+    ///    丢合成表面，经文件页中转回网页时必白闪（视频中 6.5s 切回 B 站白闪实锤）。
+    ///    现改为一律不动可见性：WebView 恒 visible，切到首页/文件时由不透明 WPF 视图盖住
+    ///    （等同浏览器后台标签，官方支持：visible 被遮挡的 WebView 继续渲染不挂起）。
+    /// ② Switched 事件带「是否创建期」参数：仅创建期切换（首开站/PDF，用户需等待反馈）
+    ///    才闪遮罩；z 序秒切不闪（此前每次切换都闪，首开时黑白翻转纯粹添乱）。
+    ///
+    /// 原方案（网页互切）不变：所有 WebView 恒 Visible=true（合成表面常驻、渲染进程不挂起），
+    /// 切换仅 Control.BringToFront() 改 WinForms 同层 z 序——不动窗口显示状态 = 无重建 = 瞬时。
+    /// </summary>
     public void Activate(string? id)
     {
-        // VERIFY(v0.4.2-try)：网页↔网页切换改「全员常显 + WinForms z 序」。
-        // 旧法根因（像素实锤）：Visible=false → Chromium 挂起丢合成表面 →
-        //   Visible=true 付重建代价 = 50~250ms 白闪(#F0F0F0) + 数百 ms 黑屏；
-        //   且 SwitchMask 是 WPF 层 Border，位于 WebView2 airspace HWND 之下，根本盖不住白闪。
-        // 新法：网页互切时所有 WebView 恒 Visible=true（合成表面常驻、永不挂起，
-        //   等同浏览器后台标签），仅 BringToFront 改 WinForms z 序 = 瞬时、无重建。
-        // 目标为首页/文件（非网页）时才隐藏全部（该场景可接受重建代价）。
         var target = id == null ? null : _tabs.FirstOrDefault(t => t.Id == id);
         if (target?.View != null)
         {
@@ -252,18 +285,9 @@ public sealed class WebTabService : IDisposable
             }
             target.View.BringToFront();
         }
-        else
-        {
-            foreach (var t in _tabs)
-            {
-                if (t.View != null && t.View.Visible) t.View.Visible = false;
-            }
-        }
-        Switched?.Invoke();
+        // else：目标为首页/文件（非网页）——一律不动 WebView 可见性（见上①）
+        Switched?.Invoke(target != null && target.View == null); // 仅创建期=true
     }
-
-    /// <summary>每次实际切换后触发（MainWindow 用来启动遮罩渐隐动画）。</summary>
-    public static event Action? Switched;
 
     public void Dispose()
     {

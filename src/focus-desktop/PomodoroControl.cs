@@ -9,9 +9,22 @@ using SwmColor = System.Windows.Media.Color;
 namespace focus_desktop;
 
 /// <summary>
-/// 番茄钟卡片内容（桌面番茄钟.pyw 设计语言：环形进度+青绿/金配色+蜂鸣）。
-/// v0.3.2 简化（用户指示"不要加文字"）：环内只留倒计时数字，阶段用弧颜色表达；
-/// 修复：近 360° 退化弧（ArcSegment 起终点重合 → 未定义行为 → 巨大圆环渲染异常）。
+/// 番茄钟卡片（v0.5.4 最终定稿）。
+///
+/// 结构与行为（全部为用户 2026-08-31 逐轮验收的最终形态）：
+/// - 顶部居中「硬性专注」iOS 式滑块开关：开启=金轨道+白滑块右移；开始前可点关；
+///   按了开始后锁定不可取消；专注段跑完进休息自动关。
+///   开启时把时长拨到 30 分钟（开始前可改）。
+/// - 圆环：从 12 点钟顺时针扫剩余比例的进度弧（修正后的终点数学），9px 圆头；
+///   防退化阈值 0.995（避免开跑后 20 秒整圆跳缺口的「混乱」感）。
+/// - 环内：大号倒计时 + 阶段小字（准备/专注/小憩/长憩）。
+/// - 时长选择：Grid 五行等分列，高亮 Border 填满单元格（2px 内缩、圆角 7），
+///   高亮块永远与格子对齐、间距均匀；各段 Button 用最小模板（禁用态=原样变暗，
+///   无 WPF 默认 chrome 灰块）。
+/// - 操作：主按钮（开始/暂停/继续，青绿药丸）+ 重置（幽灵；硬性专注开启后置暗禁点）。
+/// - 硬性专注工作段进行中：时长选择整组禁点（IsEnabled=false + Opacity 0.45）。
+/// 全部按钮均为自定义最小模板——消灭了两类默认 chrome 泄漏：
+/// ① 默认按钮浅蓝渐变通栏横条；② 禁用态灰色块。
 /// </summary>
 public class PomodoroControl : System.Windows.Controls.UserControl
 {
@@ -21,29 +34,39 @@ public class PomodoroControl : System.Windows.Controls.UserControl
     private static readonly Brush Gold = new SolidColorBrush(SwmColor.FromRgb(0xF0, 0xB4, 0x29));
     private static readonly Brush Blue = new SolidColorBrush(SwmColor.FromRgb(0x7F, 0xB3, 0xE8));
     private static readonly Brush White = new SolidColorBrush(SwmColor.FromRgb(0xF0, 0xF4, 0xFF));
-    private static readonly Brush Muted = new SolidColorBrush(SwmColor.FromRgb(0x9A, 0xA0, 0xA6));
-    private static readonly Brush Track = new SolidColorBrush(SwmColor.FromRgb(0x2E, 0x2E, 0x36));
+    private static readonly Brush SubText = new SolidColorBrush(SwmColor.FromRgb(0x8A, 0x91, 0x99));
+    private static readonly Brush Track = new SolidColorBrush(SwmColor.FromRgb(0x2A, 0x2A, 0x31));
     private static readonly Brush BtnBg = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A));
+    private static readonly Brush Divider = new SolidColorBrush(SwmColor.FromRgb(0x39, 0x3E, 0x45));
 
     private static readonly int[] Modes = { 15, 25, 30, 45, 60 };
 
     private readonly PomodoroService _svc = new();
     private readonly DispatcherTimer _uiTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
-    // 环形画布 200px；ClipToBounds 防任何绘制异常溢出卡片
-    private readonly Canvas _ringCanvas = new() { Width = 230, Height = 230, ClipToBounds = true };
+    // ---- 圆环 ----
+    private readonly Canvas _ringCanvas = new() { Width = 220, Height = 220, ClipToBounds = true };
     private System.Windows.Shapes.Path? _arcPath; // 独立引用管理弧（绝不按索引删子元素）
 
     private readonly TextBlock _timeText = new()
     {
-        FontSize = 38, FontWeight = FontWeights.Light,
+        FontSize = 36, FontWeight = FontWeights.Light,
         FontFamily = new System.Windows.Media.FontFamily("Consolas"),
-        Foreground = White, TextAlignment = TextAlignment.Center, Width = 230,
+        Foreground = White, TextAlignment = TextAlignment.Center, Width = 220,
     };
+    private readonly TextBlock _phaseText = new()
+    {
+        FontSize = 12, Foreground = SubText, TextAlignment = TextAlignment.Center, Width = 220,
+    };
+
     private readonly Dictionary<int, Button> _modeBtns = new();
     private Button _btnStart = null!, _btnPause = null!, _btnReset = null!;
     private Button _hardToggle = null!;
+    private Border _hardTrack = null!, _hardThumb = null!;
     private bool _lastFinished; // 完成蜂鸣只响一次
+
+    /// <summary>用户想要的硬性专注状态（预览模式下 HardFocus.Active 不置位，视觉以此为准）。</summary>
+    private bool _hardWanted;
     /// <summary>预览模式（硬性专注仅演示不禁真锁）。</summary>
     private bool _previewMode;
 
@@ -65,9 +88,13 @@ public class PomodoroControl : System.Windows.Controls.UserControl
 
     private void OnSvcPhaseChanged() => Dispatcher.Invoke(() =>
     {
-        // 硬性专注唯一出口：专注段跑完进入休息
-        if (HardFocus.Active && _svc.CurrentPhase is PomodoroService.Phase.ShortBreak or PomodoroService.Phase.LongBreak)
+        // 硬性专注唯一出口：专注段跑完进入休息 → 自动关（用户 2026-08-31 指示）
+        if ((_hardWanted || HardFocus.Active) &&
+            _svc.CurrentPhase is PomodoroService.Phase.ShortBreak or PomodoroService.Phase.LongBreak)
+        {
+            _hardWanted = false;
             HardFocus.Release();
+        }
         Redraw();
     });
 
@@ -76,6 +103,8 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _svc.LoadConfig(cfg);
         Redraw();
     }
+
+    public void SetPreviewMode(bool preview) => _previewMode = preview;
 
     // ---------------- UI 构建 ----------------
 
@@ -86,96 +115,198 @@ public class PomodoroControl : System.Windows.Controls.UserControl
 
         var root = new StackPanel();
 
-        // 标题行（与计时器卡统一）
-        var titleRow = new Grid();
-        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new TextBlock { Text = "番茄钟", FontSize = 13, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(title, 0);
+        // ── 顶部：硬性专注滑块开关（居中）──
+        root.Children.Add(BuildHardToggle());
 
-        // 右侧组合：提示 + 硬性专注开关
-        var rightSp = new StackPanel { Orientation = Orientation.Horizontal };
-        var hint = new TextBlock { Text = "专注后自动休息 · 每 4 轮长休", FontSize = 11, Foreground = new SolidColorBrush(SwmColor.FromRgb(0x6B, 0x70, 0x76)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
-        rightSp.Children.Add(hint);
-
-        _hardToggle = new Button
-        {
-            Content = "硬性专注 关",
-            FontSize = 11,
-            Padding = new Thickness(10, 3, 10, 3),
-            Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A)),
-            Foreground = new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF)),
-            BorderThickness = new Thickness(0),
-            Cursor = System.Windows.Input.Cursors.Hand,
-        };
-        System.Windows.Automation.AutomationProperties.SetAutomationId(_hardToggle, "HardFocusToggle");
-        _hardToggle.Click += (_, _) => ToggleHardFocus();
-        rightSp.Children.Add(_hardToggle);
-        Grid.SetColumn(rightSp, 1);
-        titleRow.Children.Add(title);
-        titleRow.Children.Add(rightSp);
-        root.Children.Add(titleRow);
-
-        // 环形进度：轨道 12px；环内只有倒计时（用户指示）
+        // ── 圆环 ──
         _ringCanvas.HorizontalAlignment = HorizontalAlignment.Center;
-        _ringCanvas.Margin = new Thickness(0, 6, 0, 6);
+        _ringCanvas.Margin = new Thickness(0, 4, 0, 8);
 
-        var track = new Ellipse { Stroke = Track, StrokeThickness = 13, Width = 194, Height = 194 };
-        Canvas.SetLeft(track, 18); Canvas.SetTop(track, 18);
+        var track = new Ellipse { Stroke = Track, StrokeThickness = 9, Width = 196, Height = 196 };
+        System.Windows.Controls.Canvas.SetLeft(track, 12);
+        System.Windows.Controls.Canvas.SetTop(track, 12);
         _ringCanvas.Children.Add(track);
 
-        Canvas.SetLeft(_timeText, 0); Canvas.SetTop(_timeText, 86);
+        System.Windows.Controls.Canvas.SetLeft(_timeText, 0);
+        System.Windows.Controls.Canvas.SetTop(_timeText, 78);
         _ringCanvas.Children.Add(_timeText);
+        System.Windows.Controls.Canvas.SetLeft(_phaseText, 0);
+        System.Windows.Controls.Canvas.SetTop(_phaseText, 124);
+        _ringCanvas.Children.Add(_phaseText);
 
         root.Children.Add(_ringCanvas);
 
-        // 模式按钮 15/25/30/45/60
-        var modeRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) };
-        foreach (var m in Modes)
-        {
-            var b = new Button
-            {
-                Content = $"{m}",
-                FontSize = 12,
-                Padding = new Thickness(12, 5, 12, 5),
-                Margin = new Thickness(3, 0, 3, 0),
-                Cursor = System.Windows.Input.Cursors.Hand,
-                BorderThickness = new Thickness(0),
-                ToolTip = $"{m} 分钟专注",
-            };
-            var mins = m;
-            b.Click += (_, _) => SetMode(mins);
-            _modeBtns[m] = b;
-            modeRow.Children.Add(b);
-        }
-        root.Children.Add(modeRow);
+        // ── 时长分段选择 ──
+        root.Children.Add(BuildModeSelector());
 
-        // 操作按钮
-        var actRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
-        _btnStart = MkBtn("开始", (_, _) => Start(), Teal);
-        _btnPause = MkBtn("暂停", (_, _) => Pause(), BtnBg);
-        _btnReset = MkBtn("重置", (_, _) => Reset(), BtnBg);
+        // ── 操作按钮 ──
+        var actRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 12, 0, 0),
+        };
+        _btnStart = MkPill("开始", (_, _) => Start(), Teal, dark: true);
+        _btnPause = MkPill("暂停", (_, _) => Pause(), BtnBg, dark: false);
+        _btnReset = MkPill("重置", (_, _) => Reset(), BtnBg, dark: false);
         actRow.Children.Add(_btnStart);
         actRow.Children.Add(_btnPause);
         actRow.Children.Add(_btnReset);
         root.Children.Add(actRow);
 
         Content = root;
-        StyleModeButtons();
     }
 
-    private Button MkBtn(string text, RoutedEventHandler onClick, Brush bg)
+    /// <summary>硬性专注行：标签 + iOS 式滑块开关。开始前可开关；开始后锁死；跑完自动关。</summary>
+    private UIElement BuildHardToggle()
+    {
+        _hardToggle = new Button
+        {
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            Focusable = false,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        // 最小模板（仅 ContentPresenter）：防默认 chrome 通栏浅蓝渐变
+        var cpFactory = new FrameworkElementFactory(typeof(ContentPresenter));
+        _hardToggle.Template = new System.Windows.Controls.ControlTemplate(typeof(Button))
+        {
+            VisualTree = cpFactory,
+        };
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var label = new TextBlock
+        {
+            Text = "硬性专注",
+            FontSize = 12.5,
+            Foreground = SubText,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+        // 滑块开关：轨道 40x22 + 白色圆头 18x18，位置由 Redraw 按状态设置
+        _hardTrack = new Border
+        {
+            Width = 40,
+            Height = 22,
+            CornerRadius = new CornerRadius(11),
+            Background = new SolidColorBrush(SwmColor.FromRgb(0x3A, 0x3F, 0x46)),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _hardThumb = new Border
+        {
+            Width = 18,
+            Height = 18,
+            CornerRadius = new CornerRadius(9),
+            Background = White,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(2, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _hardTrack.Child = _hardThumb;
+        row.Children.Add(label);
+        row.Children.Add(_hardTrack);
+        row.HorizontalAlignment = HorizontalAlignment.Center;
+        _hardToggle.Content = row;
+        System.Windows.Automation.AutomationProperties.SetAutomationId(_hardToggle, "HardFocusToggle");
+        _hardToggle.Click += (_, _) => ToggleHardFocus();
+        return WrapCentered(_hardToggle);
+    }
+
+    /// <summary>时长分段选择：5 个等宽按钮（Width=60 固定、Margin 2 匀距）横排，叠加层丢弃——
+    /// 激活态直接画在按钮 Background 上（TemplateBinding 到模板 Border）。固定宽度保证
+    /// 高亮块永远完整矩形、间距绝对均匀；最小模板保证禁用态=原样变暗、无默认 chrome。
+    /// 上一版 Grid-Star 列在无外部宽度约束时退化为内容宽度→数字挤作一团、高亮变圆形浮块
+    ///（用户 14:52 截图实锤），此版从根上消除。</summary>
+    private UIElement BuildModeSelector()
+    {
+        var host = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Background = BtnBg,
+            Padding = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var m in Modes)
+        {
+            var b = new Button
+            {
+                Content = $"{m}",
+                FontSize = 13,
+                FontWeight = FontWeights.Medium,
+                Width = 60,                                   // 固定等宽：单元格+高亮块一致
+                Padding = new Thickness(0, 7, 0, 7),
+                Margin = new Thickness(2, 0, 2, 0),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF)),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Focusable = false,
+                ToolTip = $"{m} 分钟专注",
+            };
+            // 最小模板：单 Border 圆角 7 + ContentPresenter；激活时 Border 整体青绿。
+            // Padding 直接写在模板 Border 上。垂直 Padding 8 + 容器 Padding 1 = 9，
+            // 与 MkPill 的垂直 Padding 9 恒等 → 总高精确一致（用户 14:58 截图对比实锤）。
+            var modeBorder = new FrameworkElementFactory(typeof(Border));
+            modeBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
+            modeBorder.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Border.BackgroundProperty));
+            modeBorder.SetValue(Border.PaddingProperty, new Thickness(0, 8, 0, 8));
+            var modeCp = new FrameworkElementFactory(typeof(ContentPresenter));
+            modeCp.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            modeCp.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+            modeBorder.AppendChild(modeCp);
+            b.Template = new System.Windows.Controls.ControlTemplate(typeof(Button))
+            {
+                VisualTree = modeBorder,
+            };
+            b.Click += (_, _) => SetMode(m);
+            _modeBtns[m] = b;
+            sp.Children.Add(b);
+        }
+        host.Child = sp;
+        return WrapCentered(host);
+    }
+
+    private static StackPanel WrapCentered(UIElement el)
+    {
+        var g = new System.Windows.Controls.Grid();
+        g.Children.Add(el);
+        var sp = new StackPanel();
+        sp.Children.Add(g);
+        return sp;
+    }
+
+    private Button MkPill(string text, RoutedEventHandler onClick, Brush bg, bool dark)
     {
         var b = new Button
         {
             Content = text,
-            FontSize = 12.5,
-            Padding = new Thickness(20, 7, 20, 7),
-            Margin = new Thickness(4, 0, 4, 0),
+            FontSize = 13,
+            FontWeight = FontWeights.Medium,
+            Margin = new Thickness(5, 0, 5, 0),
             Cursor = System.Windows.Input.Cursors.Hand,
             BorderThickness = new Thickness(0),
             Background = bg,
-            Foreground = bg == Teal ? Brushes.Black : White,
+            Foreground = dark ? Brushes.Black : White,
+            Focusable = false,
+        };
+        // 圆角药丸模板：内边距直接设在模板 Border 上（代码构建模板下 TemplateBinding 转发 Padding 不生效）
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(18));
+        border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Border.BackgroundProperty));
+        border.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Border.BorderBrushProperty));
+        border.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Border.BorderThicknessProperty));
+        border.SetValue(Border.PaddingProperty, new Thickness(22, 9, 22, 9));
+        var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+        cp.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        cp.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        cp.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
+        border.AppendChild(cp);
+        b.Template = new System.Windows.Controls.ControlTemplate(typeof(Button))
+        {
+            VisualTree = border,
         };
         b.Click += onClick;
         return b;
@@ -189,30 +320,37 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _svc.WorkMinutes = minutes;
         _svc.Reset();
         _lastFinished = false;
-        StyleModeButtons();
         Redraw();
     }
 
     private void Start() { _svc.Start(); Redraw(); }
 
-    /// <summary>硬性专注开关：开启后退出验证禁用输入+重置禁用+自锁；
-    /// 唯一出口=当前专注段跑完（OnPhaseChanged 到休息时 Release）。</summary>
+    /// <summary>硬性专注开关：开始前可开关；开启即拨 30 分钟；工作段进行中不可取消；跑完自动关。</summary>
     private void ToggleHardFocus()
     {
-        if (HardFocus.Active)
+        // 已开启且已开始（Work 进行中）：不可取消
+        if (_hardWanted && _svc.CurrentPhase == PomodoroService.Phase.Work) return;
+        if (_hardWanted)
         {
-            // 已开启：自锁，不给关（提示出口）
-            _hardToggle.Content = "硬性专注 开·专注段结束解除";
+            // 开始前取消：回 Idle、关闭系统锁、时长保持当前值
+            _hardWanted = false;
+            HardFocus.Release();
+            _svc.Reset();
+            Redraw();
             return;
         }
-        // 开启必须伴随一个专注段（Idle 时先启动）
-        if (_svc.CurrentPhase == PomodoroService.Phase.Idle)
-            _svc.Start();
+        // 开启：时长拨到 30，不预启动（用户按 开始 才跑）
+        _svc.WorkMinutes = 30;
+        _svc.Reset();
+        _lastFinished = false;
+        _hardWanted = true;
         HardFocus.Enable(!_previewMode);
         Redraw();
     }
 
-    public void SetPreviewMode(bool preview) => _previewMode = preview;
+    /// <summary>硬性专注工作段进行中：时长选择与重置全部锁定。预览模式同样生效（可见即可感）。</summary>
+    private bool HardLocked => _hardWanted &&
+        _svc.CurrentPhase == PomodoroService.Phase.Work;
 
     private void Pause()
     {
@@ -228,10 +366,18 @@ public class PomodoroControl : System.Windows.Controls.UserControl
     {
         var remain = _svc.Remaining();
         _timeText.Text = _svc.CurrentPhase == PomodoroService.Phase.Idle
-            ? TimeSpan.FromMinutes(_svc.WorkMinutes).ToString(@"mm\:ss")
-            : remain.ToString(@"mm\:ss");
+            ? FmtDbl(TimeSpan.FromMinutes(_svc.WorkMinutes))
+            : FmtDbl(remain);
 
-        // 阶段只通过弧颜色表达：专注=青绿 休息=金 暂停=蓝（无文字标签）
+        // 阶段小字（环内、时间下方）
+        _phaseText.Text = _svc.CurrentPhase switch
+        {
+            PomodoroService.Phase.Idle => "准备",
+            PomodoroService.Phase.Work => "专注",
+            PomodoroService.Phase.ShortBreak => "小憩",
+            PomodoroService.Phase.LongBreak => "长憩",
+            _ => "",
+        };
 
         // 按钮状态机：Idle=[开始] Running=[暂停+重置] Paused=[继续+重置]
         var idle = _svc.CurrentPhase == PomodoroService.Phase.Idle;
@@ -240,23 +386,31 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _btnPause.Content = running ? "暂停" : "继续";
         _btnPause.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
         _btnReset.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
-        // 硬性专注：重置禁用（防逃避）
-        if (HardFocus.Active)
+
+        // 硬性专注：iOS 式开关视觉（开=金轨道+滑块右移）；重置在工作段进行中禁用
+        if (_hardWanted)
         {
-            _btnReset.IsEnabled = false;
-            _btnReset.Opacity = 0.45;
-            _hardToggle.Content = "硬性专注 开";
-            _hardToggle.Background = Gold;
-            _hardToggle.Foreground = Brushes.Black;
+            _btnReset.IsEnabled = !HardLocked;
+            _btnReset.Opacity = HardLocked ? 0.45 : 1;
+            _hardTrack.Background = Gold;
+            _hardThumb.HorizontalAlignment = HorizontalAlignment.Right;
+            _hardThumb.Margin = new Thickness(0, 0, 2, 0);
         }
         else
         {
             _btnReset.IsEnabled = true;
             _btnReset.Opacity = 1;
-            _hardToggle.Content = "硬性专注 关";
-            _hardToggle.Background = new SolidColorBrush(SwmColor.FromRgb(0x23, 0x23, 0x2A));
-            _hardToggle.Foreground = new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF));
+            _hardTrack.Background = new SolidColorBrush(SwmColor.FromRgb(0x3A, 0x3F, 0x46));
+            _hardThumb.HorizontalAlignment = HorizontalAlignment.Left;
+            _hardThumb.Margin = new Thickness(2, 0, 0, 0);
         }
+        // 硬性专注工作段进行中：时长选择整组禁点（开始后不可更改）
+        foreach (var (_, b) in _modeBtns)
+        {
+            b.IsEnabled = !HardLocked;
+            b.Opacity = HardLocked ? 0.45 : 1;
+        }
+
         StyleModeButtons();
         StyleActionButtons();
 
@@ -274,6 +428,18 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         }
     }
 
+    /// <summary>分:秒格式化（总分钟不取模——60 分钟显示 60:00 而非 00:00）。
+    /// TimeSpan 的 @"mm\:ss" 中 mm 是「分钟位」（0–59），60 分钟进位成 1 小时后分钟位回 0，
+    /// 用户 15:01 截图实锤「选 60 显示 00:00」。</summary>
+    private static string FmtDbl(TimeSpan t)
+    {
+        var total = (int)Math.Floor(t.TotalMinutes);
+        return $"{total:00}:{t.Seconds:00}";
+    }
+
+    /// <summary>进度弧：从 12 点钟起顺时针扫 ratio 比例。
+    /// 终点数学：顺时针方向向量 = (sin θ, −cos θ)，θ=ratio·360°（v0.5.3 修正）。
+    /// 防退化阈值 0.995（0.985 会让开跑后 ~20 秒整圆跳缺口，用户感知为「混乱」）。</summary>
     private void DrawArc(TimeSpan remain)
     {
         // 独立引用删旧弧（绝不按索引删子元素——v0.2.0 文字被吃 bug）
@@ -289,30 +455,24 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         var ratio = total > TimeSpan.Zero ? remain / total : 0;
         ratio = Math.Max(0, Math.Min(1.0, ratio));
 
-        // 防退化弧：ratio≈1（刚启动）或 ≈0（刚结束）时起终点几乎重合，
-        // ArcSegment + large-arc 行为未定义 → 曾渲染出覆盖两张卡片的巨大圆环。
-        // 近整圆画完整 EllipseGeometry；近零直接不画。
-        var color = !_svc.IsRunning ? Blue
-            : _svc.CurrentPhase == PomodoroService.Phase.Work ? TealHover
-            : Gold;
-
-        var cx = 115.0; var cy = 115.0; var R = 97.0;
-
-        if (ratio > 0.985)
+        if (ratio > 0.995)
         {
+            // 仅防真退化（起点=终点的未定义弧）
             var full = new Path
             {
-                Stroke = color, StrokeThickness = 12,
-                Data = new EllipseGeometry(new System.Windows.Point(cx, cy), R, R),
+                Stroke = ArcColor(), StrokeThickness = 9,
+                Data = new EllipseGeometry(new System.Windows.Point(110, 110), 98, 98),
             };
             _arcPath = full;
             _ringCanvas.Children.Add(full);
             return;
         }
-        if (ratio <= 0.005) return;
+        if (ratio <= 0.002) return;
 
-        var angle = -ratio * 360.0; // 顺时针（y 向下坐标系）
-        var rad = angle * Math.PI / 180.0;
+        var color = ArcColor();
+        var cx = 110.0; var cy = 110.0; var R = 98.0;
+        var theta = ratio * 360.0;                 // 顺时针角（从 12 点钟起）
+        var rad = theta * Math.PI / 180.0;
         var start = new System.Windows.Point(cx, cy - R);
         var end = new System.Windows.Point(cx + R * Math.Sin(rad), cy - R * Math.Cos(rad));
         var large = ratio > 0.5;
@@ -320,7 +480,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         var arc = new Path
         {
             Stroke = color,
-            StrokeThickness = 13,
+            StrokeThickness = 9,
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round,
             Data = new PathGeometry
@@ -339,12 +499,16 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _ringCanvas.Children.Add(arc);
     }
 
+    private Brush ArcColor() => !_svc.IsRunning ? Blue
+        : _svc.CurrentPhase == PomodoroService.Phase.Work ? TealHover
+        : Gold;
+
     private void StyleModeButtons()
     {
         foreach (var (m, b) in _modeBtns)
         {
             var active = m == _svc.WorkMinutes;
-            b.Background = active ? Teal : BtnBg;
+            b.Background = active ? Teal : Brushes.Transparent;
             b.Foreground = active ? Brushes.Black : new SolidColorBrush(SwmColor.FromRgb(0xCF, 0xCF, 0xCF));
         }
     }
