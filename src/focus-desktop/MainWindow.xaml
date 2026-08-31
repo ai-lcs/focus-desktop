@@ -222,6 +222,21 @@
             </Grid>
         </Grid>
 
+        <!-- Tab 切换过渡遮罩：盖住 WebHost 区域，250ms 渐隐（消除"深灰等待"的卡顿观感） -->
+        <Border x:Name="SwitchMask" Grid.Row="1" Background="#23262C"
+                Opacity="0" IsHitTestVisible="False">
+            <Border.Triggers>
+                <EventTrigger RoutedEvent="Border.Loaded">
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                From="0" To="0" Duration="0:0:0"/>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </EventTrigger>
+            </Border.Triggers>
+        </Border>
+
         <!-- 被拦截提示条 -->
         <Border x:Name="BlockedBar" Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Center"
                 Background="#5C1F1F" BorderBrush="#E5534B" BorderThickness="1" CornerRadius="6"

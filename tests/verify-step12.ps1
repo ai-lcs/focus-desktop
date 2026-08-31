@@ -20,98 +20,7 @@ function Info($msg) { Write-Host "  ..    $msg" -ForegroundColor DarkGray }
 
 Add-Type -AssemblyName System.Windows.Forms
 
-Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Runtime,System.Runtime.InteropServices,System.Windows.Forms @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-
-public static class Win32Probe {
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
-    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
-    [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder sb, int max);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
-    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr i, int x, int y, int cx, int cy, uint f);
-    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
-    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint data, UIntPtr extra);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-    [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
-    public delegate bool EnumProc(IntPtr h, IntPtr l);
-    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
-    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
-    public static int GetSystemMetricsSafe(int i) { try { return GetSystemMetrics(i); } catch { return 0; } }
-    public static IntPtr FindOtherWindowOfProcess(IntPtr mainHwnd, int pid) {
-        IntPtr found = IntPtr.Zero;
-        EnumWindows(delegate(IntPtr h, IntPtr l) {
-            uint wpid; GetWindowThreadProcessId(h, out wpid);
-            if (wpid == (uint)pid && h != mainHwnd && IsWindowVisible(h) && GetParent(h) == IntPtr.Zero) { found = h; return false; }
-            return true;
-        }, IntPtr.Zero);
-        return found;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT { public int L, T, R, B; }
-
-    public static string ForegroundProcessName() {
-        uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid);
-        try {
-            var p = System.Diagnostics.Process.GetProcessById((int)pid);
-            return p.ProcessName + ":" + pid;
-        } catch { return "unknown:" + pid; }
-    }
-
-    public static bool TaskbarHidden() {
-        var h = FindWindow("Shell_TrayWnd", null);
-        return h != IntPtr.Zero && !IsWindowVisible(h);
-    }
-
-    public static void TaskbarShow() {
-        var h = FindWindow("Shell_TrayWnd", null);
-        if (h != IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 0,0,0,0, 0x0001|0x0002|0x0010|0x0040);
-    }
-
-    public static string WindowStateOf(IntPtr h) {
-        if (h == IntPtr.Zero) return "notfound";
-        var style = GetWindowLong(h, -16);
-        bool caption = (style & 0x00C00000) != 0;
-        var ex = GetWindowLong(h, -20);
-        bool top = (ex & 0x8) != 0;
-        var r = new RECT(); GetWindowRect(h, out r);
-        return string.Format("caption={0} topmost={1} rect=({2},{3})-({4},{5})",
-            caption, top, r.L, r.T, r.R, r.B);
-    }
-
-    public static IntPtr FindFocusWindow() {
-        foreach (var p in System.Diagnostics.Process.GetProcessesByName("focus-desktop")) {
-            if (p.MainWindowHandle != IntPtr.Zero) return p.MainWindowHandle;
-        }
-        return IntPtr.Zero;
-    }
-
-    // Win11 开始菜单检测（实测有效的唯一判据）：
-    // 弹出时前台窗口标题变为「开始」/「Start」
-    public static bool StartMenuVisible() {
-        var h = GetForegroundWindow();
-        var sb = new StringBuilder(256);
-        GetWindowText(h, sb, 256);
-        var t = sb.ToString();
-        return t == "开始" || t == "Start";
-    }
-
-    // 注入 Win 键（SendKeys 不支持 LWIN，用 keybd_event）
-    public static void SendWinKey() {
-        keybd_event(0x5B, 0, 0, UIntPtr.Zero);        // VK_LWIN down
-        System.Threading.Thread.Sleep(50);
-        keybd_event(0x5B, 0, 2, UIntPtr.Zero);        // KEYEVENTF_KEYUP
-    }
-}
-"@
+Add-Type -Path "D:\focus-desktop\tests\Win32Probe.dll"
 
 try {
 Write-Host "`n=== focus-desktop 停点① 自动验收 ===" -ForegroundColor Cyan
@@ -266,14 +175,7 @@ if ($btn) {
 # ---------- 10. --restore 兜底 ----------
 Info "人为制造孤儿态（脏标志 true + 任务栏隐藏）……"
 Set-Content -Path $stateFile -Value '{"focus_mode_active": true}' -Encoding UTF8
-Add-Type -ReferencedAssemblies System.Diagnostics.Process,System.Runtime,System.Runtime.InteropServices,System.Windows.Forms @"
-using System; using System.Runtime.InteropServices;
-public static class TBHide {
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
-    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr i, int x, int y, int cx, int cy, uint f);
-    public static void Hide() { var h = FindWindow("Shell_TrayWnd", null); if (h != IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 0,0,0,0, 0x0001|0x0002|0x0010|0x0080); }
-}
-"@
+# TBHide 已并入预编译 Win32Probe.dll（上方 Add-Type -Path 加载）
 [TBHide]::Hide()
 Start-Sleep -Milliseconds 500
 

@@ -205,6 +205,7 @@ public partial class MainWindow : Window
             _web = new WebTabService();
             await _web.EnsureEnvironmentAsync();
             WebTabService.Blocked += host => Dispatcher.Invoke(() => ShowBlocked($"已拦截：{host}"));
+            WebTabService.Switched += () => Dispatcher.InvokeAsync(FlashSwitchMask);
             WebTabService.TitleChanged += OnTabTitleChanged;
             WebTabService.Recovering += () => Dispatcher.InvokeAsync(async () =>
             {
@@ -240,7 +241,10 @@ public partial class MainWindow : Window
             // 与手点并发安全（EnsureTabAsync 内 _creating 去重）。
             // 注意：必须在 UI 线程上 await（WebView2 控件创建跨线程会炸）——
             // v0.3.3 用 ContinueWith 落在线程池 → 跨线程异常被吞 → 预热从未生效（录屏实证）。
-            _ = WarmupAfterDelayAsync();
+            // v0.4.1h：预热彻底移除——预热在 host 折叠期创建的 WebView 会坏死
+            //（bili/deepseek 恢复后永久灰屏，实测像素级证实）。回到纯懒加载：
+            // 首次点击创建+加载（有暗底与切换遮罩兜底观感），二次起瞬时切换。
+            // _ = WarmupAfterDelayAsync();
         }
         catch (Exception ex)
         {
@@ -313,10 +317,14 @@ public partial class MainWindow : Window
         var text = new TextBlock
         {
             Text = title,
-            FontSize = 12.5,
+            // 字号 12（用户 2026-08-31：固定宽 60 下保证不截断——12.5 时 DeepSeek=61px 会溢出）
+            FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 150,
+            // 用户 2026-08-31：Tab 固定宽度 60（要同时开多个 Tab，越窄越好）。
+            // 字号12实测字宽：首页30/学习文件56/哔哩哔哩56/Chat GPT 55/AI Studio 54/DeepSeek 59，全部<60。
+            Width = 60,
+            TextAlignment = TextAlignment.Center, // 固定宽度内居中
         };
         sp.Children.Add(text);
 
@@ -349,7 +357,7 @@ public partial class MainWindow : Window
         var grid = new System.Windows.Controls.Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        sp.Margin = new Thickness(12, 7, closable ? 6 : 12, 6);
+        sp.Margin = new Thickness(8, 7, closable ? 4 : 8, 6); // 收紧边距：固定 60 文字区下整体更窄
         System.Windows.Controls.Grid.SetRow(sp, 0);
         System.Windows.Controls.Grid.SetRow(underline, 1);
         grid.Children.Add(sp);
@@ -382,10 +390,10 @@ public partial class MainWindow : Window
         TabBar.Children.Clear();
         _tabButtons.Clear();
 
-        // 固定页（不可关）：Home + 学习文件
-        _tabButtons["home"] = MakeTabButton("home", "\U0001F3E0 首页", false);
+        // 固定页（不可关）：Home + 学习文件（纯文字短名，用户 2026-08-31 指示：去 emoji、固定短）
+        _tabButtons["home"] = MakeTabButton("home", "首页", false);
         TabBar.Children.Add(_tabButtons["home"]);
-        _tabButtons["files"] = MakeTabButton("files", "\U0001F4C2 学习文件", false);
+        _tabButtons["files"] = MakeTabButton("files", "学习文件", false);
         TabBar.Children.Add(_tabButtons["files"]);
 
         // 网页 Tab（可关）
@@ -546,7 +554,8 @@ public partial class MainWindow : Window
             var info = _web.Tabs.First(t => t.Id == id);
             if (info.View == null)
             {
-                _web.Activate(null); // 立即隐藏所有网页控件，杜绝旧内容残留
+                // v0.4.1 z-order 架构：创建等待期保留旧内容可见（浏览器行为），
+                // 不再隐藏全部网页控件——隐藏会触发 Chromium 休眠，正是卡顿根源
                 if (_tabButtons.TryGetValue(id, out var btn0) && btn0.Content is Border b0
                     && b0.Child is System.Windows.Controls.Grid g0 && g0.Children[0] is StackPanel s0
                     && s0.Children[0] is TextBlock t0)
@@ -947,6 +956,16 @@ public partial class MainWindow : Window
     }
 
     // ---------------- 其他 ----------------
+
+    /// <summary>切换过渡遮罩：闪现（盖住 WebView 恢复期的深灰）→ 250ms 渐隐。</summary>
+    private void FlashSwitchMask()
+    {
+        SwitchMask.BeginAnimation(System.Windows.UIElement.OpacityProperty, null);
+        SwitchMask.Opacity = 1;
+        var anim = new System.Windows.Media.Animation.DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(250))
+        { BeginTime = TimeSpan.FromMilliseconds(80) };
+        SwitchMask.BeginAnimation(System.Windows.UIElement.OpacityProperty, anim);
+    }
 
     private void ShowBlocked(string message)
     {

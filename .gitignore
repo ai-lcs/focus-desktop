@@ -12,3 +12,14 @@ config.json
 .vscode/
 .idea/
 release/
+
+# 测试临时产物（输出/截图/帧目录不进仓库；可复用脚本 *.ps1 保留）
+tests/*-out.txt
+tests/*.png
+tests/switch/
+tests/trace/
+tests/measure/
+tests/final/
+tests/diag/
+tests/dgcheck/
+tests/smoke*.txt
