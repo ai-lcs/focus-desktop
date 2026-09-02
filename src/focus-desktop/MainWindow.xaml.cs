@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         var cfg = AppSettings.LoadOrDefault();
+        _firstRunWizardPending = !cfg.IsConfigured() && !cfg.IsLegacyConfig(); // F1：首配轮延迟预热
         BackgroundImageService.ApplyTo(HomeBgImage, HomeBgMask, cfg.BackgroundImage); // T5：首页背景图（失败静默保持纯色）
         _filesRoot = cfg.StudyFolder;
         _currentDir = _filesRoot;
@@ -157,12 +158,56 @@ public partial class MainWindow : Window
     /// <summary>预热调度：启动 1.5s 后隐藏预热全部站（v0.5.2 起预热全程不可见——
     /// 不再临时展开 WebHost，规避 19:28 视频回归的"首页上空白屏闪烁 1 秒"）。
     /// v0.5.1：预热恢复（v0.4.1h 因坏死被砍，但砍掉后首开重站/PDF 要 3-10s 盲等——
-    /// 2026-08-31 视频里 PDF 首开 4s 黑白翻转就是此代价）。</summary>
+    /// 2026-08-31 视频里 PDF 首开 4s 黑白翻转就是此代价）。
+    /// F1（v1.0.1）：首配向导轮延迟预热——MainWindow 在 config 提交前构造，预热会按默认四站建
+    /// WebView 并把默认白名单捕获进导航策略；用户若取消了站点，当轮这些 WebView 仍持有旧策略
+    /// （重启才纠正）。首配轮先把预热推后，提交后由 NotifyConfigCommitted 立即触发。</summary>
+    private static readonly TimeSpan FirstRunWarmupDelay = TimeSpan.FromMinutes(15);
+
+    /// <summary>首配轮标志：config 未 configured 且非 legacy → 本轮预热推后至提交（F1）。
+    /// 延迟到提交后再预热（NotifyConfigCommitted）——首配轮 15 分钟内若用户一直不提交，
+    /// 兜底预热按默认四站建 WebView（旧行为，重启后按最终配置纠正）。</summary>
+    private bool _firstRunWizardPending;
+
+    /// <summary>向导提交后由 App 层调用：消费首配标志 + 当轮立即预热（最终配置已落盘）。</summary>
+    internal void NotifyConfigCommitted()
+    {
+        if (!_firstRunWizardPending) return;
+        _firstRunWizardPending = false;
+        ApplyCommittedConfig();
+        _ = WarmupAfterDelayAsync();
+    }
+
+    /// <summary>
+    /// 首配提交后把最终配置应用到当轮 UI（P0 展示层闭环）：MainWindow 在提交前构造，
+    /// TabBar/首页快捷入口/Tab 注册表按默认四站生成；用户在向导里勾选/取消的站点必须
+    /// 同步到当轮——注册表增删（懒加载：未激活的 tab 只删注册元数据，无控件可清）+ TabBar 重建
+    /// + 首页快捷入口重建。已激活过的 WebView（用户在向导轮点开过网页）保留原控件，
+    /// 其导航策略捕获的旧 cfg 在重启后按最终配置纠正（v1.0.1 已知边界）。
+    /// </summary>
+    private void ApplyCommittedConfig()
+    {
+        var cfg = AppSettings.LoadOrDefault(); // 最终配置已原子落盘（向导 Completed 在 Save 之后）
+        InitSites(cfg);
+        if (_web != null)
+        {
+            // 注册表对齐最终站点集：删被取消的、加新勾选的（懒加载，不动控件）
+            var wanted = _sites.Select(s => s.TabKey).ToHashSet();
+            var current = _web.Tabs.Select(t => t.Id).ToList();
+            foreach (var id in current.Where(id => !wanted.Contains(id)))
+                _web.CloseTab(id);
+            foreach (var s in _sites.Where(s => _web.Tabs.All(t => t.Id != s.TabKey)))
+                _web.RegisterTab(s.TabKey, s.Title, s.Url);
+        }
+        BuildTabBar();          // 按对齐后的注册表重建 Tab 条（含 home/files 固定页）
+        BuildHomeSiteButtons(); // 首页快捷入口按最终站点集重建
+    }
+
     private async Task WarmupAfterDelayAsync()
     {
         try
         {
-            await Task.Delay(1500); // 尽早开始（用户 5-7 秒就会开始点 Tab）
+            await Task.Delay(_firstRunWizardPending ? FirstRunWarmupDelay : TimeSpan.FromMilliseconds(1500));
             if (_web == null || _hostPanel == null) return;
             // 预热期间若用户已点开网页 tab，跳过预热（激活路径已处理/懒加载兜底）
             if (_activeTab is not "home" and not "files") return;
@@ -774,43 +819,6 @@ public partial class MainWindow : Window
         if (parent != null && IsUnderRoot(parent)) { _currentDir = parent; RenderFiles(); }
     }
 
-    /// <summary>选择学习文件夹（系统目录选择对话框 → 写入 config.json 立即生效）。</summary>
-    private void Files_Choose_Click(object sender, RoutedEventArgs e)
-    {
-        using var dlg = new System.Windows.Forms.FolderBrowserDialog
-        {
-            Description = "选择学习文件夹（focus-desktop 只浏览这个目录）",
-            UseDescriptionForTitle = true,
-            ShowNewFolderButton = true,
-        };
-        try
-        {
-            if (Directory.Exists(_filesRoot))
-            {
-                dlg.InitialDirectory = _filesRoot;
-                dlg.SelectedPath = _filesRoot;
-            }
-            else
-            {
-                dlg.InitialDirectory = @"D:\";
-                dlg.SelectedPath = @"D:\";
-            }
-        }
-        catch { }
-
-        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK
-            && !string.IsNullOrWhiteSpace(dlg.SelectedPath))
-        {
-            var cfg = AppSettings.LoadOrDefault();
-            cfg.StudyFolder = dlg.SelectedPath;
-            cfg.Save();
-            _filesRoot = dlg.SelectedPath;
-            _currentDir = dlg.SelectedPath;
-            ShowBlocked($"学习文件夹已设为：{dlg.SelectedPath}");
-            RenderFiles();
-        }
-    }
-
     private bool IsUnderRoot(string dir)
     {
         var root = Path.GetFullPath(_filesRoot).TrimEnd('\\', '/');
@@ -829,9 +837,14 @@ public partial class MainWindow : Window
         if (!Directory.Exists(_filesRoot))
         {
             FileList.Items.Clear();
+            // 配置已冻结（v1.0.0 Public）：学习目录在首配向导一次定型，运行期不可改。
+            // 目录缺失按配置状态分流指引——configured 用户只能重装重配；向导/legacy 沿用旧文案。
+            var frozen = AppSettings.LoadOrDefault().IsConfigured();
             FileList.Items.Add(new TextBlock
             {
-                Text = $"学习目录不存在：{_filesRoot}\n请点右上「选择文件夹」重新指定。",
+                Text = frozen
+                    ? $"学习目录不存在：{_filesRoot}\n配置已冻结（首配一次定型）。请在原路径重建该文件夹，或重装应用重新配置。"
+                    : $"学习目录不存在：{_filesRoot}\n请回到向导重新指定学习目录。",
                 Foreground = (Brush)FindResource("DangerBrush"),
                 FontSize = 14,
                 TextWrapping = TextWrapping.Wrap,
@@ -1100,6 +1113,41 @@ public partial class MainWindow : Window
 
     /// <summary>登录引导横幅（向导完成后由 App 层调用；原 ShowSetupHint，Public v1 起公开）。</summary>
     internal void ShowLoginHint() => ShowSetupHint();
+
+    /// <summary>
+    /// 真预览（F2）：向导「预览首页」把瞬态草稿 cfg 应用到首页可见面（专注语/背景/快捷入口/番茄钟默认值/
+    /// 文件根）。瞬态实例 Save 被抑制，预览态不落盘、返回向导后由正式提交或重启覆盖。不触碰 Tab 栏/Web 层
+    /// （站点标签在向导轮本就未注册进 TabBar，首轮白名单预热见 WarmupAfterDelayAsync 延迟逻辑）。
+    /// </summary>
+    internal void ApplyConfigPreview(AppSettings cfg)
+    {
+        FocusQuote.Text = cfg.FocusQuote;
+        _filesRoot = cfg.StudyFolder;
+        _currentDir = _filesRoot;
+        PomoControl.LoadConfig(cfg);
+        InitSites(cfg);
+        BuildHomeSiteButtons();
+        RenderFiles();
+    }
+
+    /// <summary>预览背景图：从用户选中的源路径直读（未导入 assets）。失败静默（保持现状）。</summary>
+    internal void ApplyBackgroundPreview(string sourcePath)
+    {
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.DecodePixelWidth = 2560;
+            bmp.UriSource = new Uri(sourcePath);
+            bmp.EndInit();
+            bmp.Freeze();
+            HomeBgImage.Source = bmp;
+            HomeBgImage.Visibility = Visibility.Visible;
+            HomeBgMask.Visibility = Visibility.Visible;
+        }
+        catch { /* 解码失败保持现状 */ }
+    }
 
     private void ShowSetupHint()
     {

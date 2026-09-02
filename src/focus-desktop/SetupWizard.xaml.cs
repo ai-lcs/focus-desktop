@@ -26,6 +26,7 @@ public partial class SetupWizard : Window
     public event Action<AppSettings>? Completed;
 
     private readonly AppSettings _draft;      // 内存草稿（AppSettings.LoadOrDefault() 初始化，提交时才落盘）
+    private AppSettings? _previewCfg;         // 瞬态预览态（真预览 F2）：Save 被抑制，改动仅作用内存、预览后即弃
     private readonly Dictionary<string, WpfCheckBox> _presetChecks = new(StringComparer.OrdinalIgnoreCase);
     private int _step = 1;
     private bool _completed;
@@ -424,8 +425,56 @@ public partial class SetupWizard : Window
 
     private void Preview_Click(object sender, RoutedEventArgs e)
     {
-        Hide(); // 预览无副作用：草稿留在内存，不写 config、不注册 tab
+        PreviewDraft(); // 真预览（F2）：草稿态复制进瞬态预览态 → MainWindow 实时换肤；不写盘、可回退
+        Hide();
         ShowReturnButton();
+    }
+
+    /// <summary>
+    /// 真预览（F2）：把当前向导草稿拷贝成瞬态 AppSettings（IsTransient=true → Save 拒绝落盘），
+    /// 调 MainWindow.ApplyConfigPreview 立即换肤首页/番茄钟/文件根。预览期再次点「预览首页」刷新为新草稿态；
+    /// 「返回向导」或完成提交后预览态即弃。全程零磁盘副作用。
+    /// </summary>
+    private void PreviewDraft()
+    {
+        // 若用户从预览返回又改了草稿再预览：基于最新草稿重建（旧预览态被弃）
+        var preview = new AppSettings
+        {
+            IsTransient = true,
+            StudyFolder = FolderBox.Text.Trim().Length > 0 ? FolderBox.Text.Trim() : _draft.StudyFolder,
+            FocusQuote = QuoteBox.Text.Trim(),
+            ExitPhrase = ExitPhraseBox.Text.Trim(),
+            PomodoroWorkMinutes = _pomodoro.Work,
+            PomodoroShortBreakMinutes = _pomodoro.Short,
+            PomodoroLongBreakMinutes = _pomodoro.Long,
+            PomodoroCyclesUntilLong = _pomodoro.Cycles,
+            BackgroundImage = null, // 背景图预览走独立通道（源图未导入 assets，config 语义不可表达）
+            Sites = BuildPreviewSites(),
+        };
+        SiteCatalog.ComputeEffectiveDomains(preview, out var wl, out var ld);
+        preview.Whitelist = wl;
+        preview.LoginDomains = ld;
+
+        _previewCfg = preview;
+        if (Owner is MainWindow main)
+        {
+            main.ApplyConfigPreview(preview);
+            // 背景图：源文件直读（未导入 assets）——用户新选了用新图，没选保持现状
+            if (_bgSourcePath != null) main.ApplyBackgroundPreview(_bgSourcePath);
+        }
+    }
+
+    /// <summary>预览站点集：勾选 preset（id 引用）+ 草稿中已加 custom（引用语义，与提交同一份列表）。</summary>
+    private List<SiteCatalog.SiteEntry> BuildPreviewSites()
+    {
+        var sites = new List<SiteCatalog.SiteEntry>();
+        foreach (var id in SiteCatalog.DefaultPresetIds)
+        {
+            if (_presetChecks[id].IsChecked == true)
+                sites.Add(new SiteCatalog.SiteEntry { Id = id });
+        }
+        if (_draft.Sites != null) sites.AddRange(_draft.Sites);
+        return sites;
     }
 
     /// <summary>左上角「返回向导」浮动窗（代码构建，独立 Topmost 小窗盖在 MainWindow 上）。</summary>

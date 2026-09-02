@@ -73,6 +73,10 @@ public class AppSettings
     [JsonPropertyName("backgroundImage")]
     public string? BackgroundImage { get; set; }
 
+    /// <summary>瞬态实例（预览草稿）：Save() 拒绝落盘。仅内存态，不序列化。</summary>
+    [JsonIgnore]
+    public bool IsTransient { get; set; }
+
     /// <summary>是否已完成首次配置（冻结）。判据只认显式 true：旧配置缺失该字段视为未完成。</summary>
     public bool IsConfigured() => Configured == true;
 
@@ -100,6 +104,7 @@ public class AppSettings
 
     public void Save()
     {
+        if (IsTransient) return; // 预览草稿等瞬态实例：绝不落盘（真预览链路 T5 契约）
         Paths.EnsureDirectories();
         AtomicFile.WriteAllText(Paths.ConfigFile,
             JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));

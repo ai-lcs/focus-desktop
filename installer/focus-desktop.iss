@@ -10,7 +10,7 @@
 #define AppName "Focus Desk"
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
-#define Version "1.0.0"
+#define Version "1.0.1"
 #define Publisher "Kevin Li (ai-lcs)"
 
 [Setup]
@@ -31,8 +31,8 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
-; 允许命令行覆盖权限级别（T10 自动化：/PRIVILEGESOVERRIDE=lowest 免 UAC 装到用户目录；
-; 正常交互安装仍默认 admin 装到 Program Files）
+; 允许命令行覆盖权限级别（T10 静默自动化：/CURRENTUSER 装到用户目录免 UAC；
+; 交互安装默认 admin 装 Program Files）
 PrivilegesRequiredOverridesAllowed=commandline
 ; 未签名：SmartScreen 会提示（README FAQ 已说明）
 ArchitecturesInstallIn64BitMode=x64compatible

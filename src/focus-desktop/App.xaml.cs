@@ -139,6 +139,7 @@ public partial class App : Application
         {
             try
             {
+                main.NotifyConfigCommitted(); // F1：首配轮预热延迟到此刻——最终配置已落盘，新 WebView 捕获新策略
                 main.ShowLoginHint(); // MainWindow 公开方法（直调，反射方案已否决——编译期可见性优于运行时绑定）
             }
             catch (Exception ex)

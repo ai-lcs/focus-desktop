@@ -22,6 +22,13 @@ Add-Type -AssemblyName System.Windows.Forms
 
 Add-Type -Path "D:\focus-desktop\tests\Win32Probe.dll"
 
+# 僵尸进程过滤（AGENTS §9 已知项：测试残留 threads=0 纯内核进程，杀不掉也不占 Mutex）。
+# Get-Process 会把它们一并返回 → 「进程存活/未退出」类断言永远为真 = 干净退出误判 FAIL。
+# 统一入口：只认有线程的活进程。
+function Get-LiveApp {
+    Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Where-Object { $_.Threads.Count -gt 0 }
+}
+
 try {
 Write-Host "`n=== focus-desktop 停点① 自动验收 ===" -ForegroundColor Cyan
 
@@ -80,7 +87,7 @@ else { Fail "Alt+Tab 拦截" "前台从 $before 切到 $after" }
 Info "注入 Alt+F4……"
 [System.Windows.Forms.SendKeys]::SendWait("%{F4}")
 Start-Sleep -Milliseconds 1500
-if (Get-Process "focus-desktop" -ErrorAction SilentlyContinue) { Pass "Alt+F4 被拦（进程存活）" }
+if (Get-LiveApp) { Pass "Alt+F4 被拦（进程存活）" }
 else { Fail "Alt+F4 拦截" "进程退出了" }
 
 # ---------- 7. 强杀 → 脏标志 ----------
@@ -114,7 +121,7 @@ else { Fail "重启自愈" "无 self-heal 日志且任务栏未隐藏" }
 # ---------- 9. 干净退出（UIA 点击退出按钮）----------
 Info "UIA 点击退出按钮……"
 Add-Type -AssemblyName UIAutomationClient
-$proc = @(Get-Process "focus-desktop" -ErrorAction Stop) | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+$proc = @(Get-LiveApp) | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$proc.MainWindowHandle)
 $cond = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::NameProperty, "退出")
@@ -161,7 +168,7 @@ if ($btn) {
         [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
     } else { Fail "干净退出" "Win32 FindWindow 未找到弹窗" }
     Start-Sleep -Milliseconds 2500
-    if (-not (Get-Process "focus-desktop" -ErrorAction SilentlyContinue)) {
+    if (-not (Get-LiveApp)) {
         Pass "干净退出（UIA 点击退出 → 进程退出）"
         Start-Sleep -Milliseconds 800
         if (-not [Win32Probe]::TaskbarHidden()) { Pass "退出后任务栏恢复" }

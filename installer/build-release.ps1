@@ -1,15 +1,41 @@
-# build-release.ps1 — Public v1 一键构建：publish → portable.zip → Inno Setup → 双产物落 release/
+﻿# build-release.ps1 — Public v1 一键构建：publish → portable.zip → Inno Setup → 双产物落 release/
 # 用法：powershell -ExecutionPolicy Bypass -File installer/build-release.ps1 [-SkipInstaller]
+# 路径策略（F5）：仓库根按脚本位置推导（任意 clone 位置可用）；dotnet 依次解析
+#   env:DOTNET_ROOT → PATH → 常见安装位置；ISCC 走 PATH → 默认安装路径。
 param([switch]$SkipInstaller)
 
 $ErrorActionPreference = "Stop"
-$repo = "D:\focus-desktop"
+$repo = Split-Path -Parent $PSScriptRoot          # installer\ 的上一级 = 仓库根
 $src = Join-Path $repo "src\focus-desktop"
 $releaseDir = Join-Path $repo "release"
 $portableDir = Join-Path $releaseDir "focus-desktop"
 $payloadDir = Join-Path $repo "installer\payload"
-$version = "1.0.0"
-$iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+$version = "1.0.1"
+
+# --- dotnet 解析：DOTNET_ROOT → PATH → 常见安装位置（vs 纯写死 Kevin 本机路径） ---
+$dotnetExe = $null
+if ($env:DOTNET_ROOT -and (Test-Path (Join-Path $env:DOTNET_ROOT "dotnet.exe"))) {
+    $dotnetExe = Join-Path $env:DOTNET_ROOT "dotnet.exe"
+} else {
+    $candidates = @()
+    $pathDotnet = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+    if ($pathDotnet) { $candidates += $pathDotnet.Source }
+    $candidates += @(
+        "$env:USERPROFILE\.dotnet\dotnet.exe",
+        "$env:ProgramFiles\dotnet\dotnet.exe",
+        "${env:ProgramFiles(x86)}\dotnet\dotnet.exe"
+    )
+    $dotnetExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+}
+if (-not $dotnetExe) { throw "dotnet.exe not found (set DOTNET_ROOT or add dotnet to PATH)" }
+$env:DOTNET_ROOT = Split-Path -Parent $dotnetExe
+
+# --- ISCC 解析：PATH → 默认安装位置 ---
+$iscc = $null
+$pathIscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+if ($pathIscc) { $iscc = $pathIscc.Source }
+elseif (Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") { $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" }
+elseif (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe") { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
 
 Write-Host "== 1/4 publish（自包含单文件 = portable 目录本体）==" -ForegroundColor Cyan
 # 关键：IncludeNativeLibrariesForSelfExtract=true 把 WPF 本机库（PresentationNative/wpfgfx/D3DCompiler/PenImc）
@@ -19,10 +45,9 @@ Write-Host "== 1/4 publish（自包含单文件 = portable 目录本体）==" -F
 Get-ChildItem $portableDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*.sha256" -and $_.Name -ne "rel-smoke.txt" -and $_.Name -ne "portable.flag" } | Remove-Item -Force -ErrorAction SilentlyContinue
 Remove-Item "$portableDir\runtimes" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$portableDir\zh-Hans" -Recurse -Force -ErrorAction SilentlyContinue
-$env:DOTNET_ROOT = "C:\Users\LCS\.dotnet"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 $env:DOTNET_NOLOGO = "1"
-& "C:\Users\LCS\.dotnet\dotnet.exe" publish (Join-Path $src "focus-desktop.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $portableDir --nologo -v q
+& $dotnetExe publish (Join-Path $src "focus-desktop.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $portableDir --nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "publish failed" }
 Write-Host "   exe OK: $portableDir\focus-desktop.exe"
 

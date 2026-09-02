@@ -170,7 +170,6 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <Button Content="← 返回" Grid.Column="0" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13"
                             Click="Files_Back_Click"/>
@@ -184,8 +183,6 @@
                              Background="{DynamicResource PanelBrush}"
                              Foreground="{DynamicResource FgBrush}"
                              BorderBrush="{DynamicResource BorderBrush}"/>
-                    <Button Content="📁 选择文件夹" Grid.Column="4" Style="{StaticResource NavBtn}" Padding="14,6" FontSize="13" Margin="8,0,0,0"
-                            Click="Files_Choose_Click"/>
                 </Grid>
                 <ListBox x:Name="FileList" Grid.Row="1" Background="Transparent"
                          BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"

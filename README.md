@@ -26,7 +26,7 @@ Focus Desk 是一个**行为摩擦**工具，不是家长管控：
 | 便携版 | `focus-desktop-portable-1.0.0.zip`（约 62 MB） | 免安装：解压到任意文件夹，双击 `focus-desktop.exe` 即用 |
 
 - 两种版本功能完全一致；免 .NET 安装（自包含）；
-- 安装版装到用户目录（不需要管理员权限），数据存放在 `C:\Users\<你>\AppData\Local\focus-desktop`；
+- 安装版默认装到 Program Files（需要管理员权限，双击会弹 UAC），数据存放在 `%LOCALAPPDATA%\focus-desktop`；如需免管理员装到用户目录，命令行加 `/CURRENTUSER` 参数；
 - 便携版所有数据在 exe 旁的 `focus-desktop-data\` 文件夹，整个文件夹可随 U 盘带走；
 - 升级：直接装新版本覆盖，配置和网站登录态全部保留；
 - 卸载：控制面板卸载，会询问是否同时删除配置/登录数据（学习文件夹永远不碰）。
