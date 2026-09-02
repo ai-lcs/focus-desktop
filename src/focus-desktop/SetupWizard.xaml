@@ -1,0 +1,246 @@
+<Window x:Class="focus_desktop.SetupWizard"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="focus-desktop 首次配置"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="Manual"
+        Left="0"
+        Top="0"
+        Topmost="True"
+        WindowState="Maximized"
+        Background="#23262C"
+        Foreground="#F0F4FF"
+        UseLayoutRounding="True">
+    <Window.Resources>
+        <!-- 向导本地资源：必须全部定义在 Window.Resources 内、且在使用之前（XamlParseException 坑） -->
+        <SolidColorBrush x:Key="WzText" Color="#F0F4FF"/>
+        <SolidColorBrush x:Key="WzMuted" Color="#9AA0A6"/>
+        <SolidColorBrush x:Key="WzDanger" Color="#E5534B"/>
+        <SolidColorBrush x:Key="WzStepActive" Color="#F5C542"/>
+        <SolidColorBrush x:Key="WzStepInactive" Color="#9AA0A6"/>
+        <SolidColorBrush x:Key="WzCardBg" Color="#2B2F37"/>
+        <SolidColorBrush x:Key="WzCardBorder" Color="#4A505A"/>
+        <SolidColorBrush x:Key="WzInputBg" Color="#202124"/>
+        <LinearGradientBrush x:Key="WzBg" StartPoint="0.1,0" EndPoint="0.9,1">
+            <GradientStop Color="#23262C" Offset="0"/>
+            <GradientStop Color="#2B2F37" Offset="0.55"/>
+            <GradientStop Color="#31353E" Offset="1"/>
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="WzCardGradient" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#3E434D" Offset="0"/>
+            <GradientStop Color="#353A43" Offset="1"/>
+        </LinearGradientBrush>
+
+        <Style x:Key="WzTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource WzInputBg}"/>
+            <Setter Property="Foreground" Value="{StaticResource WzText}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource WzCardBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="CaretBrush" Value="#F0F4FF"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- 主按钮：金色底深色字（NavBtn 为应用级样式，先于本窗口加载） -->
+        <Style x:Key="WzPrimaryBtn" TargetType="Button" BasedOn="{StaticResource NavBtn}">
+            <Setter Property="Background" Value="#F5C542"/>
+            <Setter Property="Foreground" Value="#202124"/>
+            <Setter Property="BorderBrush" Value="#F5C542"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="{StaticResource WzBg}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="64"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="92"/>
+        </Grid.RowDefinitions>
+
+        <!-- 顶部：步骤指示（当前步高亮） -->
+        <Border Grid.Row="0" Background="#26292E" BorderBrush="{StaticResource WzCardBorder}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock x:Name="Step1Indicator" Text="1 学习文件夹" FontSize="16" Margin="0,0,10,0" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock Text="·" FontSize="16" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock x:Name="Step2Indicator" Text="2 站点" FontSize="16" Margin="10,0,10,0" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock Text="·" FontSize="16" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock x:Name="Step3Indicator" Text="3 专注" FontSize="16" Margin="10,0,10,0" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock Text="·" FontSize="16" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock x:Name="Step4Indicator" Text="4 背景" FontSize="16" Margin="10,0,0,0" Foreground="{StaticResource WzStepInactive}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- 中间：步骤内容区 -->
+        <Grid Grid.Row="1">
+
+            <!-- 第 1 步：学习文件夹 -->
+            <Grid x:Name="Step1Panel" Margin="48,28,48,16">
+                <StackPanel MaxWidth="780" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="选择学习文件夹" FontSize="26" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,0,0,12"/>
+                    <TextBlock Text="这是你的专注学习资料目录，PDF、图片、笔记都会放在这里。推荐保留默认位置，也可以换成你习惯的文件夹。"
+                               FontSize="14" TextWrapping="Wrap" Foreground="{StaticResource WzMuted}" Margin="0,0,0,28"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="FolderBox" Grid.Column="0" Style="{StaticResource WzTextBox}" IsReadOnly="True"
+                                 AutomationProperties.AutomationId="SetupPathText"
+                                 ToolTip="学习文件夹路径"/>
+                        <Button Grid.Column="1" Style="{StaticResource NavBtn}" Content="浏览…" Padding="22,10" AutomationProperties.AutomationId="SetupBrowseButton"
+                                FontSize="14" Margin="12,0,0,0" Click="BrowseFolder_Click" Cursor="Hand"/>
+                    </Grid>
+                    <TextBlock x:Name="FolderError" Text="" FontSize="13" Foreground="{StaticResource WzDanger}"
+                               Margin="0,10,0,0" Visibility="Collapsed"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- 第 2 步：站点 -->
+            <Grid x:Name="Step2Panel" Visibility="Collapsed" Margin="48,28,48,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="选择常用网站" FontSize="26" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,0,0,8"/>
+                    <TextBlock Text="勾选你常用的网站，它们会出现在首页和标签栏。也可以添加自定义网站。"
+                               FontSize="14" TextWrapping="Wrap" Foreground="{StaticResource WzMuted}" Margin="0,0,0,18"/>
+                </StackPanel>
+
+                <!-- 预设卡片（代码按 SiteCatalog 生成，勾选框形式） -->
+                <WrapPanel x:Name="PresetPanel" Grid.Row="1" HorizontalAlignment="Center"/>
+
+                <TextBlock x:Name="SitesError" Grid.Row="2" Text="" FontSize="13" Foreground="{StaticResource WzDanger}"
+                           Margin="0,8,0,0" HorizontalAlignment="Center" Visibility="Collapsed"/>
+
+                <!-- 自定义网站：添加区 + 已添加列表 -->
+                <Border Grid.Row="3" Background="{StaticResource WzCardBg}" CornerRadius="12"
+                        BorderBrush="{StaticResource WzCardBorder}" BorderThickness="1"
+                        Padding="20,16" Margin="0,12,0,0" VerticalAlignment="Top">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="添加自定义网站" FontSize="15" FontWeight="Bold"
+                                   Foreground="{StaticResource WzText}" Margin="0,0,0,10"/>
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.4*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CustomUrlBox" Grid.Column="0" Style="{StaticResource WzTextBox}" AutomationProperties.AutomationId="SetupCustomUrlInput"
+                                     ToolTip="网址，如 example.com"/>
+                            <TextBox x:Name="CustomTitleBox" Grid.Column="1" Style="{StaticResource WzTextBox}" AutomationProperties.AutomationId="SetupCustomTitleInput"
+                                     Margin="10,0,0,0" ToolTip="显示名称（可选）"/>
+                            <Button Grid.Column="2" Style="{StaticResource NavBtn}" Content="添加" Padding="22,10"
+                                    FontSize="14" Margin="12,0,0,0" Click="AddCustomSite_Click" Cursor="Hand"
+                                    AutomationProperties.AutomationId="SetupCustomAddButton"/>
+                        </Grid>
+                        <TextBlock x:Name="CustomError" Grid.Row="2" Text="" FontSize="13" AutomationProperties.AutomationId="SetupCustomErrorText" Foreground="{StaticResource WzDanger}"
+                                   Margin="0,10,0,0" Visibility="Collapsed"/>
+                        <ScrollViewer Grid.Row="3" MaxHeight="150" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
+                            <StackPanel x:Name="CustomListPanel" AutomationProperties.AutomationId="SetupCustomList"/>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 第 3 步：专注 -->
+            <Grid x:Name="Step3Panel" Visibility="Collapsed" Margin="48,28,48,16">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="780" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="专注设置" FontSize="26" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,0,0,8"/>
+                        <TextBlock Text="设定你的专注方式，之后也可以随时调整。" FontSize="14"
+                                   Foreground="{StaticResource WzMuted}" Margin="0,0,0,24"/>
+
+                        <TextBlock Text="专注语" FontSize="14" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,0,0,8"/>
+                        <TextBox x:Name="QuoteBox" Style="{StaticResource WzTextBox}" MaxLength="60" AutomationProperties.AutomationId="SetupFocusQuoteInput"/>
+
+                        <TextBlock Text="退出输入词" FontSize="14" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,20,0,8"/>
+                        <TextBox x:Name="ExitPhraseBox" Style="{StaticResource WzTextBox}" TextWrapping="Wrap" AutomationProperties.AutomationId="SetupExitPhraseInput"
+                                 AcceptsReturn="True" MinHeight="70" MaxLength="120" VerticalContentAlignment="Top"/>
+
+                        <TextBlock Text="番茄钟" FontSize="14" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,20,0,8"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="工作（分钟）" FontSize="12" Foreground="{StaticResource WzMuted}" Margin="0,0,0,6"/>
+                                <TextBox x:Name="PomoWorkBox" Style="{StaticResource WzTextBox}" Text="25" MaxLength="3" AutomationProperties.AutomationId="SetupPomoWork"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                <TextBlock Text="短休息（分钟）" FontSize="12" Foreground="{StaticResource WzMuted}" Margin="0,0,0,6"/>
+                                <TextBox x:Name="PomoShortBox" Style="{StaticResource WzTextBox}" Text="5" MaxLength="3" AutomationProperties.AutomationId="SetupPomoShort"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Margin="12,0,0,0">
+                                <TextBlock Text="长休息（分钟）" FontSize="12" Foreground="{StaticResource WzMuted}" Margin="0,0,0,6"/>
+                                <TextBox x:Name="PomoLongBox" Style="{StaticResource WzTextBox}" Text="15" MaxLength="3" AutomationProperties.AutomationId="SetupPomoLong"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="3" Margin="12,0,0,0">
+                                <TextBlock Text="几轮后长休息" FontSize="12" Foreground="{StaticResource WzMuted}" Margin="0,0,0,6"/>
+                                <TextBox x:Name="PomoCyclesBox" Style="{StaticResource WzTextBox}" Text="4" MaxLength="2" AutomationProperties.AutomationId="SetupPomoCycles"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock x:Name="FocusError" Text="" FontSize="13" Foreground="{StaticResource WzDanger}"
+                                   Margin="0,14,0,0" Visibility="Collapsed"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- 第 4 步：背景（可跳过） -->
+            <Grid x:Name="Step4Panel" Visibility="Collapsed" Margin="48,28,48,16">
+                <StackPanel MaxWidth="780" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="首页背景（可选）" FontSize="26" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,0,0,8"/>
+                    <TextBlock Text="可以选一张图片作为首页背景，也可以跳过这一步。" FontSize="14"
+                               Foreground="{StaticResource WzMuted}" Margin="0,0,0,24"/>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource NavBtn}" Content="🖼 选择图片…" Padding="24,10" FontSize="14"
+                                Click="ChooseBg_Click" Cursor="Hand" AutomationProperties.AutomationId="SetupBgChooseButton"/>
+                        <Button Style="{StaticResource NavBtn}" Content="不设置背景" Padding="24,10" FontSize="14"
+                                Margin="12,0,0,0" Click="ClearBg_Click" Cursor="Hand" AutomationProperties.AutomationId="SetupBgClearButton"/>
+                    </StackPanel>
+
+                    <!-- 缩略图预览：固定 300x160，UniformToFill = 中心裁切 cover 效果 -->
+                    <Border x:Name="BgPreviewBorder" Width="300" Height="160" CornerRadius="12" ClipToBounds="True"
+                            BorderBrush="{StaticResource WzCardBorder}" BorderThickness="1" Background="#1A1C1F"
+                            Margin="0,20,0,0" HorizontalAlignment="Left">
+                        <Image x:Name="BgPreviewImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <!-- 底部：导航 -->
+        <Border Grid.Row="2" Background="#26292E" BorderBrush="{StaticResource WzCardBorder}" BorderThickness="0,1,0,0">
+            <Grid Margin="48,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="BackButton" Grid.Column="0" Style="{StaticResource NavBtn}" Content="← 返回上一步" AutomationProperties.AutomationId="SetupBackButton"
+                        Padding="22,10" FontSize="14" HorizontalAlignment="Left" Click="Back_Click" IsEnabled="False"/>
+                <Button x:Name="PreviewButton" Grid.Column="1" Style="{StaticResource NavBtn}" Content="预览首页" AutomationProperties.AutomationId="SetupPreviewButton"
+                        Padding="26,10" FontSize="14" Click="Preview_Click" Cursor="Hand"/>
+                <Button x:Name="PrimaryButton" Grid.Column="2" Style="{StaticResource WzPrimaryBtn}" Content="下一步" AutomationProperties.AutomationId="SetupNextButton"
+                        Padding="28,10" FontSize="15" HorizontalAlignment="Right" Click="Primary_Click" Cursor="Hand"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

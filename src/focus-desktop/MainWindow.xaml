@@ -93,6 +93,13 @@
                     <ColumnDefinition Width="1*"/>
                 </Grid.ColumnDefinitions>
 
+                <!-- 首页背景图（用户向导选图；很浅+暗化保证 UI 可读；加载成功才可见） -->
+                <Image x:Name="HomeBgImage" Grid.ColumnSpan="2"
+                       Stretch="UniformToFill" StretchDirection="Both"
+                       Opacity="0.22" IsHitTestVisible="False" Visibility="Collapsed"/>
+                <Border x:Name="HomeBgMask" Grid.ColumnSpan="2"
+                        Background="#99000000" IsHitTestVisible="False" Visibility="Collapsed"/>
+
                 <!-- 左列：时钟 + 日期 + 专注语卡片 + 快捷入口（紧凑分组，消除空洞感） -->
                 <StackPanel Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
                     <TextBlock x:Name="BigClock" Text="00:00"
@@ -107,12 +114,8 @@
                                    FontSize="18" FontWeight="Medium" HorizontalAlignment="Center" TextWrapping="Wrap"
                                    Foreground="#F5C542" TextAlignment="Center" LineHeight="30"/>
                     </Border>
-                    <!-- 快捷入口：网页四站一行，学习文件独立第二行居中（用户 2026-08-30 指示） -->
-                    <WrapPanel HorizontalAlignment="Center">
-                        <Button Style="{StaticResource NavBtn}" Content="📺 Bilibili" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Bili_Click"/>
-                        <Button Style="{StaticResource NavBtn}" Content="💬 ChatGPT" FontSize="14" Padding="18,10" Margin="4" Click="Nav_ChatGPT_Click"/>
-                        <Button Style="{StaticResource NavBtn}" Content="✦ Gemini" FontSize="14" Padding="18,10" Margin="4" Click="Nav_Gemini_Click"/>
-                        <Button Style="{StaticResource NavBtn}" Content="◈ DeepSeek" FontSize="14" Padding="18,10" Margin="4" Click="Nav_DeepSeek_Click"/>
+                    <!-- 快捷入口：站点按钮由代码按配置动态生成（Public v1 数据驱动），学习文件独立第二行 -->
+                    <WrapPanel x:Name="HomeSitesPanel" HorizontalAlignment="Center">
                     </WrapPanel>
                     <Button Style="{StaticResource NavBtn}" Content="📂 学习文件" FontSize="14" Padding="30,10"
                             HorizontalAlignment="Center" Margin="0,10,0,0" Click="Nav_Files_Click"/>

@@ -1,4 +1,4 @@
-// Win32Probe.cs — verify-step12.ps1 探针（预编译 DLL，根治 PS5.1 Add-Type -ReferencedAssemblies 漂移）。
+﻿// Win32Probe.cs — verify-step12.ps1 探针（预编译 DLL，根治 PS5.1 Add-Type -ReferencedAssemblies 漂移）。
 // !! 方法签名/语义必须与 git HEAD 版 here-string 逐字一致 —— 那是 13/13 全绿、实测定罪过
 // 应用 bug 的版本；改语义=改判据（2026-08-31 曾因语义漂移制造 4 个误报）。
 // C#5 兼容（csc v4.0.30319 编译）：不用 out var、不用 lambda 默认参数。
@@ -21,6 +21,7 @@ public static class Win32Probe {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
     public delegate bool EnumProc(IntPtr h, IntPtr l);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);

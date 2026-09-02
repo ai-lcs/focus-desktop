@@ -34,6 +34,10 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _everActivated = new();
     private int _pdfCount; // PDF 多开计数
 
+    // ---- 站点（Public v1 数据驱动：唯一真相 = SiteCatalog.ResolveSites(cfg)） ----
+    private List<SiteCatalog.SiteDef> _sites = new();
+    private readonly Dictionary<string, string> _siteIcons = new(StringComparer.OrdinalIgnoreCase);
+
     // ---- 文件浏览 ----
     private string _filesRoot;
     private string _currentDir;
@@ -47,8 +51,10 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         var cfg = AppSettings.LoadOrDefault();
+        BackgroundImageService.ApplyTo(HomeBgImage, HomeBgMask, cfg.BackgroundImage); // T5：首页背景图（失败静默保持纯色）
         _filesRoot = cfg.StudyFolder;
         _currentDir = _filesRoot;
+        InitSites(cfg); // Public v1：站点集/图标/有效域名全部由 SiteCatalog 从配置解析（不再硬编码）
 
         // 铺满主屏（单显示器项目，按用户决策不做多屏）。
         // 关键坑（2026-08-30 实测）：本机 WPF 逻辑尺寸≈物理尺寸的 2 倍（DPI 200% 感知），
@@ -184,15 +190,14 @@ public partial class MainWindow : Window
                 WfHost.Child = _hostPanel;
 
                 // smoke 仍全量急切创建（高危路径必须被测）
-                _web.RegisterTab("bili", "哔哩哔哩", "https://www.bilibili.com");
-                _web.RegisterTab("chatgpt", "Chat GPT", "https://chatgpt.com");
-                _web.RegisterTab("gemini", "AI Studio", "https://aistudio.google.com");
-                _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
+                foreach (var s in _sites)
+                    _web.RegisterTab(s.TabKey, s.Title, s.Url);
                 foreach (var tab in _web.Tabs.ToList())
                     await _web.EnsureTabAsync(tab.Id, _hostPanel);
-                App.SmokeLog("smoke: 4 web tabs created");
+                App.SmokeLog($"smoke: {_sites.Count} web tabs created");
 
                 BuildTabBar();
+                BuildHomeSiteButtons();
             }
             catch (Exception ex)
             {
@@ -234,16 +239,15 @@ public partial class MainWindow : Window
             _hostPanel = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Fill };
             WfHost.Child = _hostPanel;
 
-            _web.RegisterTab("bili", "哔哩哔哩", "https://www.bilibili.com");
-            _web.RegisterTab("chatgpt", "Chat GPT", "https://chatgpt.com");
-            _web.RegisterTab("gemini", "AI Studio", "https://aistudio.google.com");
-            _web.RegisterTab("deepseek", "DeepSeek", "https://chat.deepseek.com");
+            foreach (var s in _sites)
+                _web.RegisterTab(s.TabKey, s.Title, s.Url);
 
             // 面板底色=主题深灰：折叠期/切换间隙露出的 WinForms 裸底色（默认
             // SystemColors.Control=#F0F0F0）就是切换白闪的来源之一（2026-08-31 视频实锤）
             _hostPanel.BackColor = System.Drawing.Color.FromArgb(0x23, 0x26, 0x2C);
 
             BuildTabBar();
+            BuildHomeSiteButtons(); // 首页快捷入口按解析出的站点动态生成（v0.5.x 为 XAML 硬编码四站）
 
             // 预热（v0.5.2 隐藏形态）：启动 1.5s 后错峰逐个建控件+导航，全程不可见。
             // 首开站/PDF 时页面已就绪 —— 消除首开 3-10s 盲等（2026-08-31 视频 PDF 首开 4s 实锤）。
@@ -437,6 +441,9 @@ public partial class MainWindow : Window
             Cursor = System.Windows.Input.Cursors.Hand,
             Foreground = (Brush)FindResource("MutedBrush"),
         };
+        // 显式标记：非 tab_ 前缀，TabIdOf 会跳过它。不设 AutomationId 时 WPF 返回 ""（v0.5.4 崩因），
+        // 显式设一个值可让 UIA 测试脚本稳定定位「+」（verify-tabs 也依赖此 id 找它）。
+        System.Windows.Automation.AutomationProperties.SetAutomationId(b, "AddTabButton");
         b.Click += AddTabButton_Click;
         return b;
     }
@@ -451,16 +458,65 @@ public partial class MainWindow : Window
 
     private void AddTabButton_Click(object sender, RoutedEventArgs e) => ShowNewTabMenu();
 
-    /// <summary>四站快捷定义（"+"菜单与快捷入口共用）。</summary>
-    private static readonly (string Id, string Title, string Url)[] QuickSites =
-    {
-        ("bili", "哔哩哔哩", "https://www.bilibili.com"),
-        ("chatgpt", "Chat GPT", "https://chatgpt.com"),
-        ("gemini", "AI Studio", "https://aistudio.google.com"),
-        ("deepseek", "DeepSeek", "https://chat.deepseek.com"),
-    };
+    // ---------------- 站点解析与初始化（Public v1 数据驱动） ----------------
 
-    /// <summary>"+"新建 Tab：弹出四站选择浮层（点站名开新 Tab）。</summary>
+    /// <summary>preset 站点默认图标（UI 提示字符，非品牌资产）。custom 默认 🌐。</summary>
+    private static readonly IReadOnlyDictionary<string, string> DefaultSiteIcons =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["bili"] = "📺", ["chatgpt"] = "💬", ["aistudio"] = "✦", ["gemini"] = "✦", ["deepseek"] = "◈",
+        };
+
+    /// <summary>首页快捷入口显示名（v0.5.4 同款英文短名——中文长名四按钮超 480px 列宽会折行成
+    /// 3+1+1 不对称布局，用户 2026-09-02「对称美学」指示恢复上一版排布）。tab 栏仍用中文短名。</summary>
+    private static readonly IReadOnlyDictionary<string, string> HomeSiteNames =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["bili"] = "Bilibili", ["chatgpt"] = "ChatGPT", ["aistudio"] = "AI Studio",
+            ["gemini"] = "Gemini", ["deepseek"] = "DeepSeek",
+        };
+
+    /// <summary>
+    /// 从配置解析站点集（唯一入口，构造函数调用一次）：
+    /// - 站点列表 = SiteCatalog.ResolveSites（legacy 配置自动展开为 4 preset）；
+    /// - 有效白名单/登录域由 SiteCatalog 重算后写回 cfg（本次运行生效，不落盘）；
+    /// - 图标：preset 取默认表，custom 默认 🌐（config 未来加 emoji 字段时读 cfg，暂不入 schema）。
+    /// </summary>
+    private void InitSites(AppSettings cfg)
+    {
+        _sites = SiteCatalog.ResolveSites(cfg);
+        SiteCatalog.ComputeEffectiveDomains(cfg, out var wl, out var ld);
+        cfg.Whitelist = wl;
+        cfg.LoginDomains = ld;
+        _siteIcons.Clear();
+        foreach (var s in _sites)
+            _siteIcons[s.TabKey] = DefaultSiteIcons.TryGetValue(s.TabKey, out var ic) ? ic : "🌐";
+    }
+
+    private string SiteIcon(string id) => _siteIcons.TryGetValue(id, out var ic) ? ic : "🌐";
+
+    /// <summary>首页快捷入口按钮（HomeSitesPanel，XAML 只占位）：按解析出的站点动态生成。</summary>
+    private void BuildHomeSiteButtons()
+    {
+        HomeSitesPanel.Children.Clear();
+        foreach (var s in _sites)
+        {
+            var site = s;
+            var b = new WpfButton
+            {
+                Style = (Style)FindResource("NavBtn"),
+                Content = $"{SiteIcon(site.TabKey)} {(HomeSiteNames.TryGetValue(site.TabKey, out var hn) ? hn : site.Title)}",
+                FontSize = 14,
+                Padding = new Thickness(18, 10, 18, 10),
+                Margin = new Thickness(4),
+                Cursor = System.Windows.Input.Cursors.Hand,
+            };
+            b.Click += (_, _) => NavOrOpen(site.TabKey);
+            HomeSitesPanel.Children.Add(b);
+        }
+    }
+
+    /// <summary>"+"新建 Tab：弹出站点选择浮层（数据源 = 解析后的站点集，数据驱动）。</summary>
     private void ShowNewTabMenu()
     {
         var menu = new Popup
@@ -479,12 +535,12 @@ public partial class MainWindow : Window
             Padding = new Thickness(6),
         };
         var sp = new StackPanel();
-        foreach (var site in QuickSites)
+        foreach (var site in _sites)
         {
             var s = site;
             var item = new WpfButton
             {
-                Content = $"{s.Title}  新标签页",
+                Content = $"{SiteIcon(s.TabKey)} {s.Title}  新标签页",
                 FontSize = 13,
                 Padding = new Thickness(14, 8, 14, 8),
                 Margin = new Thickness(0, 1, 0, 1),
@@ -497,7 +553,7 @@ public partial class MainWindow : Window
             item.Click += (_, _) =>
             {
                 menu.IsOpen = false;
-                _ = OpenNewSiteTabAsync(s.Id, s.Title, s.Url);
+                _ = OpenNewSiteTabAsync(s.TabKey, s.Title, s.Url);
             };
             sp.Children.Add(item);
         }
@@ -506,15 +562,21 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
-    /// <summary>开一个新站 Tab（同站可多开：GPT 两个、B站 三个…）。</summary>
+    /// <summary>开一个新站 Tab（preset 同站可多开：GPT 两个、B站 三个…；custom 单例——
+    /// tab 被关掉后从「+」菜单重开即恢复原 id，避免动态站点多开 id 的持久化管理）。</summary>
     private async Task OpenNewSiteTabAsync(string baseId, string title, string url)
     {
         if (_web == null || _hostPanel == null) return;
-        // 找未占用的 id：bili / bili-2 / bili-3 …
+        var site = _sites.FirstOrDefault(s => s.TabKey == baseId);
+        var allowMulti = site?.AllowMulti ?? true; // 查无此站（理论不到达）按旧语义放行
+        // 找未占用的 id：bili / bili-2 / bili-3 …（单例站点只取原 id）
         var id = baseId;
         var n = 1;
         while (_web.Tabs.Any(t => t.Id == id))
+        {
+            if (!allowMulti) { ActivateTab(baseId); return; } // 已在：直接切过去
             id = $"{baseId}-{++n}";
+        }
         var tabTitle = n == 1 ? title : $"{title} {n}";
         _web.RegisterTab(id, tabTitle, url);
         AddWebTabButton(id, tabTitle);
@@ -535,8 +597,26 @@ public partial class MainWindow : Window
     /// <summary>Tab 顺序（从 Tab 条 UIA id 还原）。</summary>
     private List<string> TabOrder() =>
         TabBar.Children.OfType<WpfButton>()
-              .Select(b => System.Windows.Automation.AutomationProperties.GetAutomationId(b)?[4..])
-              .Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).ToList();
+              .Select(TabIdOf)
+              .Where(id => id != null)
+              .Select(id => id!)
+              .ToList();
+
+    /// <summary>
+    /// 从 Tab 按钮提取业务 id（如 "home"/"files"/"bili"/"chatgpt"/"pdf-1"）。
+    /// 契约：按钮的 AutomationId 形如 "tab_&lt;id&gt;"（见 <see cref="MakeTabButton"/>）。
+    /// 防御三类输入，全部返回 null（调用方用 Where 过滤）：
+    ///   ① 无 AutomationId（WPF 返回 ""，不是 null——「+」按钮即此，v0.5.4 曾因此 [4..] 越界炸死进程）；
+    ///   ② AutomationId 长度 &lt; 5（无法容纳 "tab_" 前缀 + 至少 1 字符 id）；
+    ///   ③ AutomationId 不以 "tab_" 开头（未来若向 TabBar 加其他按钮，不会误解析）。
+    /// </summary>
+    private static string? TabIdOf(WpfButton b)
+    {
+        var aid = System.Windows.Automation.AutomationProperties.GetAutomationId(b);
+        if (string.IsNullOrEmpty(aid) || aid.Length < 5 || !aid.StartsWith("tab_", StringComparison.Ordinal))
+            return null;
+        return aid.Substring(4);
+    }
 
     private void CloseTabById(string id)
     {
@@ -642,17 +722,14 @@ public partial class MainWindow : Window
         ActivateTab("files");
         RenderFiles();
     }
-    private void Nav_Bili_Click(object sender, RoutedEventArgs e) => NavOrOpen(0);
-    private void Nav_ChatGPT_Click(object sender, RoutedEventArgs e) => NavOrOpen(1);
-    private void Nav_Gemini_Click(object sender, RoutedEventArgs e) => NavOrOpen(2);
-    private void Nav_DeepSeek_Click(object sender, RoutedEventArgs e) => NavOrOpen(3);
 
-    /// <summary>快捷入口：Tab 在就直接切，被关了就新开一个（浏览器习惯）。</summary>
-    private void NavOrOpen(int siteIndex)
+    /// <summary>快捷入口：Tab 在就直接切，被关了就新开一个（浏览器习惯）。站点来自解析后的配置。</summary>
+    private void NavOrOpen(string siteId)
     {
-        var (id, title, url) = QuickSites[siteIndex];
-        if (_web != null && _web.Tabs.Any(t => t.Id == id)) ActivateTab(id);
-        else _ = OpenNewSiteTabAsync(id, title, url);
+        var site = _sites.FirstOrDefault(s => s.TabKey == siteId);
+        if (site == null) return;
+        if (_web != null && _web.Tabs.Any(t => t.Id == site.TabKey)) ActivateTab(site.TabKey);
+        else _ = OpenNewSiteTabAsync(site.TabKey, site.Title, site.Url);
     }
 
     // ---------------- 自由计时器 ----------------
@@ -854,8 +931,12 @@ public partial class MainWindow : Window
                 Orientation = Orientation.Horizontal,
                 Children =
                 {
-                    new TextBlock { Text = icon, FontSize = 18, Margin = new Thickness(0, 0, 10, 0) },
-                    new TextBlock { Text = name, FontSize = 14, VerticalAlignment = VerticalAlignment.Center },
+                    new TextBlock { Text = icon, FontSize = 18, Margin = new Thickness(0, 0, 10, 0),
+                        // 必须显式设 Foreground：TextBlock 不显式设置时取 WPF 默认系统前景（黑），
+                        // 而本窗口是深色主题 → 黑色文字融进深色背景看不见（2026-09-01 用户反馈）。
+                        Foreground = (Brush)FindResource("FgBrush") },
+                    new TextBlock { Text = name, FontSize = 14, VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = (Brush)FindResource("FgBrush") },
                 }
             },
             HorizontalAlignment = HorizontalAlignment.Left,
@@ -1017,6 +1098,9 @@ public partial class MainWindow : Window
         t.Start();
     }
 
+    /// <summary>登录引导横幅（向导完成后由 App 层调用；原 ShowSetupHint，Public v1 起公开）。</summary>
+    internal void ShowLoginHint() => ShowSetupHint();
+
     private void ShowSetupHint()
     {
         // 首次运行（Setup 模式，未锁定）：常驻横幅 + 开始专注按钮
@@ -1059,10 +1143,12 @@ public partial class MainWindow : Window
         };
         sp.Children.Add(startBtn);
         banner.Child = sp;
-        // 插到 HomeView（现为 Grid）第一行上方：放进左列 StackPanel 顶部
-        if (HomeView is Grid g && g.Children.Count > 0 && g.Children[0] is StackPanel left)
+        // 左列 StackPanel = HomeView 里第一个 StackPanel 类型子元素（T5 背景图加入后 [0] 是 Image，
+        // 不能再按下标取——按下标取会在背景图场景下静默失败 = 登录引导横幅不出现）
+        if (HomeView is Grid g)
         {
-            left.Children.Insert(0, banner);
+            var left = g.Children.OfType<StackPanel>().FirstOrDefault();
+            left?.Children.Insert(0, banner);
         }
     }
 

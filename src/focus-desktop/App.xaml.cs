@@ -85,9 +85,16 @@ public partial class App : Application
             _focus.Recover();
         }
 
-        // 配置：首次运行生成默认 config.json（白名单/退出语/学习目录，Step 3+ 使用）
+        // 配置：全新安装（config 不存在）才生成默认 config.json（含 Configured=false 标记——
+        // 默认 Whitelist 非空会被 IsLegacyConfig() 误判，显式 false 保证走向导）。
+        // 已存在的配置（含 legacy v1）原样不动：无条件 Save 会把 configured:false 等 v2 字段
+        // 混写进老文件，破坏 IsLegacyConfig() 的 Configured==null 判定（T6 实测定罪）。
         var settings = AppSettings.LoadOrDefault();
-        settings.Save();
+        if (!AppSettings.Exists())
+        {
+            settings.Configured = false;
+            settings.Save();
+        }
 
         var main = new MainWindow(_options, _focus);
         MainWindow = main;
@@ -101,16 +108,45 @@ public partial class App : Application
         main.Show();
 
         // 锁定策略：--smoke 永不锁；--preview 预览模式（不锁+普通窗口+直接退出，给用户调配置用）；
-        // 首次运行（无 setup_done）进 Setup 模式（不锁，自由登录）；此后每次启动直接锁定
-        if (!_options.Dev && !_options.Smoke && !_options.Preview && !FirstRunSetup.IsSetupComplete())
+        // 首次配置（Configured != true 且非 legacy 老配置）→ 显示配置向导层（不锁，自由登录）；
+        // legacy 配置视为已配置（不进向导）；此后每次启动直接锁定
+        if (!_options.Dev && !_options.Smoke && !_options.Preview)
         {
-            FirstRunSetup.EnterSetupMode();
-            App.SmokeLog("first-run setup mode (no lock)");
+            if (!settings.IsConfigured() && !settings.IsLegacyConfig())
+            {
+                ShowSetupWizard(settings);
+                App.SmokeLog("first-run setup wizard mode (no lock)");
+            }
+            else
+            {
+                _focus.Enter(); // 真实模式：进锁定
+            }
         }
-        else if (!_options.Dev && !_options.Smoke && !_options.Preview)
+    }
+
+    /// <summary>Public v1 首次配置向导：独立全屏覆盖层（盖在 MainWindow 上；不保存、不进锁定）。</summary>
+    private void ShowSetupWizard(AppSettings draft)
+    {
+        var wizard = new SetupWizard(draft, (MainWindow)MainWindow);
+        wizard.Completed += OnSetupWizardCompleted;
+        wizard.Show();
+    }
+
+    /// <summary>向导完成（config 已原子写入 + setup_done.flag 已写）→ 进入下一步：登录引导横幅。</summary>
+    private void OnSetupWizardCompleted(AppSettings finalConfig)
+    {
+        if (MainWindow is MainWindow main)
         {
-            _focus.Enter(); // 真实模式：进锁定
+            try
+            {
+                main.ShowLoginHint(); // MainWindow 公开方法（直调，反射方案已否决——编译期可见性优于运行时绑定）
+            }
+            catch (Exception ex)
+            {
+                CrashReporter.Write(ex, "wizard-complete-hint");
+            }
         }
+        App.SmokeLog("setup wizard completed; login hint shown");
     }
 
     protected override void OnExit(ExitEventArgs e)

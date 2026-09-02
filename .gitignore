@@ -23,3 +23,9 @@ tests/final/
 tests/diag/
 tests/dgcheck/
 tests/smoke*.txt
+
+# Public v1 新增
+tests/verify-results.txt
+backups/
+assets/focus-icon-16-preview.png
+installer/payload/
