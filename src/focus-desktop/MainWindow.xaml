@@ -107,11 +107,14 @@
                                    FontSize="18" FontWeight="Medium" HorizontalAlignment="Center" TextWrapping="Wrap"
                                    Foreground="#F5C542" TextAlignment="Center" LineHeight="30"/>
                     </Border>
-                    <!-- 快捷入口：站点按钮由代码按配置动态生成（Public v1 数据驱动），学习文件独立第二行 -->
-                    <WrapPanel x:Name="HomeSitesPanel" HorizontalAlignment="Center">
-                    </WrapPanel>
-                    <Button Style="{StaticResource NavBtn}" Content="📂 学习文件" FontSize="14" Padding="30,10"
-                            HorizontalAlignment="Center" Margin="0,10,0,0" Click="Nav_Files_Click"/>
+                    <!-- 快捷入口：站点+学习文件统一等宽网格（v1.0.3 对称美学：同宽、同行地位、居中） -->
+                    <Grid x:Name="HomeNavGrid" HorizontalAlignment="Center" Margin="0,0,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                    </Grid>
                 </StackPanel>
 
                 <!-- 右列：计时器卡片 + 番茄钟卡片（拉伸铺满列高，修右下空洞） -->

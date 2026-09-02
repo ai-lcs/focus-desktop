@@ -518,6 +518,7 @@ public partial class MainWindow : Window
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["bili"] = "📺", ["chatgpt"] = "💬", ["aistudio"] = "✦", ["gemini"] = "✦", ["deepseek"] = "◈",
+            ["notebooklm"] = "📔",
         };
 
     /// <summary>首页快捷入口显示名（v0.5.4 同款英文短名——中文长名四按钮超 480px 列宽会折行成
@@ -526,7 +527,7 @@ public partial class MainWindow : Window
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["bili"] = "Bilibili", ["chatgpt"] = "ChatGPT", ["aistudio"] = "AI Studio",
-            ["gemini"] = "Gemini", ["deepseek"] = "DeepSeek",
+            ["gemini"] = "Gemini", ["deepseek"] = "DeepSeek", ["notebooklm"] = "NotebookLM",
         };
 
     /// <summary>
@@ -548,25 +549,64 @@ public partial class MainWindow : Window
 
     private string SiteIcon(string id) => _siteIcons.TryGetValue(id, out var ic) ? ic : "🌐";
 
-    /// <summary>首页快捷入口按钮（HomeSitesPanel，XAML 只占位）：按解析出的站点动态生成。</summary>
+    /// <summary>
+    /// 首页快捷入口（HomeNavGrid，XAML 只占位）：站点 + 「学习文件」统一为等宽网格按钮。
+    /// v1.0.3 用户指示（2026-09-03）：
+    /// - 学习文件与网页站「享受相同地位」，不再另起一行；
+    /// - 每个按钮宽度统一（UniformGrid 定宽，不随文字长度变化）；
+    /// - 多行时整组居中（两行起 WrapPanel 内子组居中——UniformGrid 居中放置）；
+    /// - custom 站点用简称（向导强制填写 ≤8 字符），杜绝超长按钮。
+    /// </summary>
     private void BuildHomeSiteButtons()
     {
-        HomeSitesPanel.Children.Clear();
+        HomeNavGrid.Children.Clear();
+        HomeNavGrid.RowDefinitions.Clear();
+
+        // 按钮统一规格：固定宽 132px（4 列内含 480px 列宽），高与旧版一致
+        const double BtnW = 132;
+        const int PerRow = 3;
+
+        // 条目：站点（含学习文件，作为普通一员排在站点之后）
+        var items = new List<(string Key, string Icon, string Name, Action Open)>();
         foreach (var s in _sites)
         {
             var site = s;
+            var name = HomeSiteNames.TryGetValue(site.TabKey, out var hn) ? hn : site.Title;
+            items.Add((site.TabKey, SiteIcon(site.TabKey), name, () => NavOrOpen(site.TabKey)));
+        }
+        items.Add(("files", "📂", "学习文件", () => NavOrOpen("files")));
+
+        // 行数 + UniformGrid 等宽列
+        var rows = (items.Count + PerRow - 1) / PerRow;
+        for (var r = 0; r < rows; r++)
+            HomeNavGrid.RowDefinitions.Add(new RowDefinition());
+
+        var row = 0; var col = 0;
+        foreach (var (key, icon, name, open) in items)
+        {
             var b = new WpfButton
             {
                 Style = (Style)FindResource("NavBtn"),
-                Content = $"{SiteIcon(site.TabKey)} {(HomeSiteNames.TryGetValue(site.TabKey, out var hn) ? hn : site.Title)}",
+                Content = $"{icon} {name}",
                 FontSize = 14,
-                Padding = new Thickness(18, 10, 18, 10),
+                Width = BtnW,
+                Padding = new Thickness(0, 10, 0, 10),
                 Margin = new Thickness(4),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 Cursor = System.Windows.Input.Cursors.Hand,
             };
-            b.Click += (_, _) => NavOrOpen(site.TabKey);
-            HomeSitesPanel.Children.Add(b);
+            // 文本超长截断（custom 简称 ≤8 已在向导把关，此处兜底防溢出）
+            if (b.Content is string txt && txt.Length > 12)
+                b.Content = txt[..12];
+            b.Click += (_, _) => open();
+            System.Windows.Controls.Grid.SetRow(b, row);
+            System.Windows.Controls.Grid.SetColumn(b, col);
+            HomeNavGrid.Children.Add(b);
+            col++;
+            if (col >= PerRow) { col = 0; row++; }
         }
+        // 整组居中：网格本身在父 StackPanel 里水平居中（XAML HorizontalAlignment=Center），
+        // 网格宽度=列数×按钮宽（不拉伸占满列宽），行内不满时按钮仍从左排满已定义列。
     }
 
     /// <summary>"+"新建 Tab：弹出站点选择浮层（数据源 = 解析后的站点集，数据驱动）。</summary>
@@ -776,9 +816,16 @@ public partial class MainWindow : Window
         RenderFiles();
     }
 
-    /// <summary>快捷入口：Tab 在就直接切，被关了就新开一个（浏览器习惯）。站点来自解析后的配置。</summary>
+    /// <summary>快捷入口：Tab 在就直接切，被关了就新开一个（浏览器习惯）。站点来自解析后的配置。
+    /// "files" 特判：学习文件是固定页（不可关），直接切 + 重渲染列表。</summary>
     private void NavOrOpen(string siteId)
     {
+        if (siteId == "files")
+        {
+            ActivateTab("files");
+            RenderFiles();
+            return;
+        }
         var site = _sites.FirstOrDefault(s => s.TabKey == siteId);
         if (site == null) return;
         if (_web != null && _web.Tabs.Any(t => t.Id == site.TabKey)) ActivateTab(site.TabKey);

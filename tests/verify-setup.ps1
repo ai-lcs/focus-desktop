@@ -119,8 +119,8 @@ Check "step1 folder default" ($folderText -ne $null -and $folderText.Length -gt 
 Check "step1 next works" (Click-Id $pid1 "SetupNextButton")
 Start-Sleep -Milliseconds 600
 
-# 步骤2 preset 勾选默认
-foreach ($sid in @("SetupPreset_bili","SetupPreset_chatgpt","SetupPreset_gemini","SetupPreset_deepseek")) {
+# 步骤2 preset 勾选默认（v1.0.3：五站含 notebooklm）
+foreach ($sid in @("SetupPreset_bili","SetupPreset_chatgpt","SetupPreset_gemini","SetupPreset_deepseek","SetupPreset_notebooklm")) {
     $cb = FindById $pid1 $sid
     $ok = $cb -ne $null -and $cb.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -eq "On"
     Check "preset $sid checked" $ok
@@ -140,19 +140,46 @@ if ($customUrl -ne $null) {
     } catch { Check "custom url input accepts value" $false }
 } else { Check "custom url input exists" $false }
 
+# v1.0.3：简称必填——不填 title 直接点添加应报错
+[void](Click-Id $pid1 "SetupCustomAddButton")
+Start-Sleep -Milliseconds 400
+$titleRequiredShown = $false
+for ($i = 0; $i -lt 8; $i++) {
+    Start-Sleep -Milliseconds 250
+    if ((FindByName $pid1 "请填写网站简称（将显示在首页和标签栏）。") -ne $null) { $titleRequiredShown = $true; break }
+}
+Check "custom title required (v1.0.3)" $titleRequiredShown
+
+# 填写简称后再添加（v1.0.3：简称必填 ≤8 字符）
+$customTitle = FindById $pid1 "SetupCustomTitleInput"
+if ($customTitle -ne $null) {
+    try {
+        $tvp = $customTitle.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        $tvp.SetValue("Notion")
+        Start-Sleep -Milliseconds 300
+        Check "custom title input accepts value" ($tvp.Current.Value -eq "Notion")
+    } catch { Check "custom title input accepts value" $false }
+} else { Check "custom title input exists" $false }
+
 Check "custom add works" (Click-Id $pid1 "SetupCustomAddButton")
 Start-Sleep -Milliseconds 600
-# Border 行元素无 UIA peer（WFP Border 不暴露），但其子 TextBlock 可见：按 Name 找 notion.so
-$notionTb = FindByName $pid1 "notion.so"
+# Border 行元素无 UIA peer（WFP Border 不暴露），但其子 TextBlock 可见：按 Name 找 Notion
+$notionTb = FindByName $pid1 "Notion"
 Check "custom site appears in list" ($notionTb -ne $null)
 
 # 步骤2 添加失败用例（撞 preset 子域）→ 统一错误提示可见
+# v1.0.3：title 框在成功添加后被清空——失败用例需先重填简称，否则先弹「请填写简称」
 $customUrl2 = FindById $pid1 "SetupCustomUrlInput"
 if ($customUrl2 -ne $null) {
     try { $customUrl2.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("sub.bilibili.com") } catch { }
 }
+$customTitle2 = FindById $pid1 "SetupCustomTitleInput"
+if ($customTitle2 -ne $null) {
+    try { $customTitle2.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("SubBili") } catch { }
+}
 [void](Click-Id $pid1 "SetupCustomAddButton")
 # 错误 TextBlock 从 Collapsed 变 Visible 需要 UIA 树刷新——轮询重试至 2s
+# （title=SubBili 已填——撞 preset 子域走 URL 校验分支）
 $errFound = $false
 for ($i = 0; $i -lt 8; $i++) {
     Start-Sleep -Milliseconds 250
@@ -181,11 +208,8 @@ if ($pomoW -ne $null) {
     try { (FindById $pid1 "SetupPomoWork").GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("25") } catch { }
 } else { Check "pomo work input exists" $false }
 
-# 步骤3 → 步骤4
-Check "step3 next works" (Click-Id $pid1 "SetupNextButton")
+# 步骤3（末步）→ 点「预览首页」（v1.0.3：向导 3 步，专注设置即末步）
 Start-Sleep -Milliseconds 600
-
-# 步骤4 预览（无副作用）
 Check "preview button works" (Click-Id $pid1 "SetupPreviewButton")
 Start-Sleep -Milliseconds 800
 $wizardGone = (FindById $pid1 "SetupNextButton") -eq $null
@@ -238,7 +262,7 @@ $cfgText = ""
 if (Test-Path $cfg) { $cfgText = Get-Content $cfg -Raw }
 Check "config written atomically" ($cfgText -match '"configured":\s*true')
 Check "config schemaVersion 2" ($cfgText -match '"schemaVersion":\s*2')
-Check "config sites include presets" ($cfgText -match '"bili"' -and $cfgText -match '"deepseek"')
+Check "config sites include presets" ($cfgText -match '"bili"' -and $cfgText -match '"deepseek"' -and $cfgText -match '"notebooklm"')
 Check "config sites include custom notion" ($cfgText -match 'notion\.so')
 Check "setup_done flag written" (Test-Path $setupFlag)
 $loginHint = $null
@@ -258,16 +282,20 @@ Kill-App
 $p = Wait-App 10
 $noWizard = (FindById $p.Id "SetupNextButton") -eq $null
 Check "no wizard after configured restart" $noWizard
-# tab 条与提交配置一致
+# tab 条与提交配置一致（v1.0.3：notebooklm 第 5 preset tab 也应在）
 $tabs = 0
+$nbTab = $null
 try {
     $w3 = Get-Win $p.Id
     if ($w3 -ne $null) {
         $cnd3 = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, "tab_site")
         if ($w3.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cnd3) -ne $null) { $tabs = 1 }
+        $cnd4 = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, "tab_notebooklm")
+        $nbTab = $w3.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cnd4)
     }
 } catch { }
 Check "custom site tab (tab_site) after restart" ($tabs -eq 1)
+Check "notebooklm tab (tab_notebooklm) after restart (v1.0.3)" ($nbTab -ne $null)
 Kill-App
 
 # ============ 12. Legacy 配置不进向导 ============
@@ -290,12 +318,12 @@ Set-Content -Path $cfg -Value $legacyFixture -Encoding UTF8
 $p = Wait-App 10
 $noWizardLegacy = (FindById $p.Id "SetupNextButton") -eq $null
 Check "legacy config skips wizard" $noWizardLegacy
-$legacyTabs = @("tab_bili","tab_chatgpt","tab_gemini","tab_deepseek")
+$legacyTabs = @("tab_bili","tab_chatgpt","tab_gemini","tab_deepseek","tab_notebooklm")
 $legacyOk = $true
 foreach ($tid in $legacyTabs) {
     if ((FindById $p.Id $tid) -eq $null) { $legacyOk = $false }
 }
-Check "legacy tab set matches v0.5.4" $legacyOk
+Check "legacy tab set matches v1.0.3 (5 presets)" $legacyOk
 Kill-App
 
 # ============ 清理：孤儿 webview + 恢复配置 ============

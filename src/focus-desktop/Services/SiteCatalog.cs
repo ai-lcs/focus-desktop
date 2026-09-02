@@ -46,12 +46,16 @@ public static class SiteCatalog
                 new[] { "accounts.google.com" }, true, true),
             ["deepseek"] = new("deepseek", "deepseek", "DeepSeek", "https://chat.deepseek.com",
                 new[] { "deepseek.com" }, Array.Empty<string>(), true, true),
+            // v1.0.3：NotebookLM 升为第 5 preset（用户 2026-09-03 指示，社区反馈）。tab/首页短名 NotebookLM。
+            ["notebooklm"] = new("notebooklm", "notebooklm", "NotebookLM", "https://notebooklm.google.com",
+                new[] { "notebooklm.google.com" }, new[] { "accounts.google.com" }, true, true),
         };
 
     /// <summary>默认站点集（Setup 向导初始勾选 / legacy 配置的运行时展开）。
-    /// 注意用历史 id "gemini"（v0.5.4 硬编码 id 与 verify-tabs.ps1 断言所系），BuiltInSites 经别名解析。</summary>
+    /// 注意用历史 id "gemini"（v0.5.4 硬编码 id 与 verify-tabs.ps1 断言所系），BuiltInSites 经别名解析。
+    /// v1.0.3：加入第 5 站 notebooklm。</summary>
     public static readonly IReadOnlyList<string> DefaultPresetIds =
-        new[] { "bili", "chatgpt", "gemini", "deepseek" };
+        new[] { "bili", "chatgpt", "gemini", "deepseek", "notebooklm" };
 
     /// <summary>域名/白名单条目的归一化：小写 + 去 www. 前缀 + Trim。所有比较前必须走这里。</summary>
     public static string NormalizeDomain(string raw)

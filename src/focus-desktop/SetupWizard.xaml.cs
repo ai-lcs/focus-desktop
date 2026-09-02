@@ -379,6 +379,18 @@ public partial class SetupWizard : Window
     {
         App.SmokeLog($"wizard add-custom: url=[{CustomUrlBox.Text}] title=[{CustomTitleBox.Text}]");
         HideError(CustomError);
+        // 简称必填且 ≤8 字符（v1.0.3 用户指示：杜绝「notebooklm.google.com」式超长按钮，保持首页对称）
+        var title = CustomTitleBox.Text.Trim();
+        if (title.Length == 0)
+        {
+            ShowError(CustomError, "请填写网站简称（将显示在首页和标签栏）。");
+            return;
+        }
+        if (title.Length > 8)
+        {
+            ShowError(CustomError, "简称不能超过 8 个字符，请换一个更短的。");
+            return;
+        }
         // 已勾选 preset 的域也参与冲突检查（勾选状态是独立 UI 状态，不在 _draft.Sites 里——
         // 不传则 sub.bilibili.com 之类撞勾选 B 站的输入漏检，T6 实测定罪）
         var checkedPresetDomains = _presetChecks

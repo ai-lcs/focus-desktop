@@ -66,13 +66,14 @@ public static class UrlSelfTest
 
         Console.WriteLine("== 组1 SiteCatalog.ResolveSites ==");
         {
-            // 默认 cfg（Sites=null）→ 4 个 preset，id 顺序 bili/chatgpt/gemini/deepseek，全 IsPreset、AllowMulti
-            // （"gemini" 为 v0.5.4 历史 id，经 BuiltInSites 别名解析到 AI Studio 定义）
+            // 默认 cfg（Sites=null）→ 5 个 preset，id 顺序 bili/chatgpt/gemini/deepseek/notebooklm，全 IsPreset、AllowMulti
+            // （"gemini" 为 v0.5.4 历史 id，经 BuiltInSites 别名解析到 AI Studio 定义；
+            //  v1.0.3 notebooklm 升第 5 preset——用户 2026-09-03 指示）
             var g1 = new AppSettings();
             var r1 = SiteCatalog.ResolveSites(g1);
-            CheckBool("ResolveSites: 默认返回 4 站", r1.Count == 4, true);
-            CheckBool("ResolveSites: id 顺序 bili/chatgpt/gemini/deepseek (实际: " + string.Join(",", r1.Select(s => s.TabKey)) + ")",
-                string.Join(",", r1.Select(s => s.TabKey)) == "bili,chatgpt,gemini,deepseek", true);
+            CheckBool("ResolveSites: 默认返回 5 站", r1.Count == 5, true);
+            CheckBool("ResolveSites: id 顺序 bili/chatgpt/gemini/deepseek/notebooklm (实际: " + string.Join(",", r1.Select(s => s.TabKey)) + ")",
+                string.Join(",", r1.Select(s => s.TabKey)) == "bili,chatgpt,gemini,deepseek,notebooklm", true);
             CheckBool("ResolveSites: 全部 IsPreset", r1.All(s => s.IsPreset), true);
             CheckBool("ResolveSites: 全部 AllowMulti", r1.All(s => s.AllowMulti), true);
         }
