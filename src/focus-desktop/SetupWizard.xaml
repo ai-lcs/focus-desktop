@@ -68,8 +68,6 @@
                 <TextBlock x:Name="Step2Indicator" Text="2 站点" FontSize="16" Margin="10,0,10,0" Foreground="{StaticResource WzStepInactive}"/>
                 <TextBlock Text="·" FontSize="16" Foreground="{StaticResource WzStepInactive}"/>
                 <TextBlock x:Name="Step3Indicator" Text="3 专注" FontSize="16" Margin="10,0,10,0" Foreground="{StaticResource WzStepInactive}"/>
-                <TextBlock Text="·" FontSize="16" Foreground="{StaticResource WzStepInactive}"/>
-                <TextBlock x:Name="Step4Indicator" Text="4 背景" FontSize="16" Margin="10,0,0,0" Foreground="{StaticResource WzStepInactive}"/>
             </StackPanel>
         </Border>
 
@@ -200,29 +198,6 @@
                                    Margin="0,14,0,0" Visibility="Collapsed"/>
                     </StackPanel>
                 </ScrollViewer>
-            </Grid>
-
-            <!-- 第 4 步：背景（可跳过） -->
-            <Grid x:Name="Step4Panel" Visibility="Collapsed" Margin="48,28,48,16">
-                <StackPanel MaxWidth="780" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <TextBlock Text="首页背景（可选）" FontSize="26" FontWeight="Bold" Foreground="{StaticResource WzText}" Margin="0,0,0,8"/>
-                    <TextBlock Text="可以选一张图片作为首页背景，也可以跳过这一步。" FontSize="14"
-                               Foreground="{StaticResource WzMuted}" Margin="0,0,0,24"/>
-
-                    <StackPanel Orientation="Horizontal">
-                        <Button Style="{StaticResource NavBtn}" Content="🖼 选择图片…" Padding="24,10" FontSize="14"
-                                Click="ChooseBg_Click" Cursor="Hand" AutomationProperties.AutomationId="SetupBgChooseButton"/>
-                        <Button Style="{StaticResource NavBtn}" Content="不设置背景" Padding="24,10" FontSize="14"
-                                Margin="12,0,0,0" Click="ClearBg_Click" Cursor="Hand" AutomationProperties.AutomationId="SetupBgClearButton"/>
-                    </StackPanel>
-
-                    <!-- 缩略图预览：固定 300x160，UniformToFill = 中心裁切 cover 效果 -->
-                    <Border x:Name="BgPreviewBorder" Width="300" Height="160" CornerRadius="12" ClipToBounds="True"
-                            BorderBrush="{StaticResource WzCardBorder}" BorderThickness="1" Background="#1A1C1F"
-                            Margin="0,20,0,0" HorizontalAlignment="Left">
-                        <Image x:Name="BgPreviewImage" Stretch="UniformToFill" Visibility="Collapsed"/>
-                    </Border>
-                </StackPanel>
             </Grid>
         </Grid>
 

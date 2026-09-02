@@ -1,9 +1,15 @@
 ﻿# verify-install.ps1 — T10: 安装包真机三态回归（静默装 → 首跑落 LocalAppData → 覆盖装保数据 → 卸载清数据/保学习目录）
-# 前提：installer/build-release.ps1 已产出 release\FocusDesktop-Setup-1.0.0.exe
-# 全程 /VERYSILENT + /CURRENTUSER（装到用户目录免 UAC，不动 Program Files）
+# 前提：installer/build-release.ps1 已产出 release\FocusDesktop-Setup-<version>.exe
+# Setup 路径动态推导（v1.0.2 审计修复：此前写死 1.0.0，版本升级后跑的是磁盘残留旧包 = 假绿）：
+#   优先取仓库 release\ 下最新的 FocusDesktop-Setup-*.exe（时间戳最新），也可用 -Setup 参数显式指定。
+param([string]$Setup = "")
 $ErrorActionPreference = "Continue"
-
-$setup = "D:\focus-desktop\release\FocusDesktop-Setup-1.0.0.exe"
+$repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)   # tests\ 的上一级 = 仓库根
+if (-not $Setup) {
+    $candidates = Get-ChildItem (Join-Path $repo "release") -Filter "FocusDesktop-Setup-*.exe" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if ($candidates) { $Setup = $candidates[0].FullName }
+}
 $userInstallDir = "$env:LOCALAPPDATA\Programs\FocusDesk"   # lowest 权限默认装这
 $localData = "$env:LOCALAPPDATA\focus-desktop"
 $desktop = [Environment]::GetFolderPath("Desktop")
@@ -13,7 +19,8 @@ function Check($name, $cond) {
     if ($cond) { $script:pass++; Log "PASS $name" } else { $script:fail++; Log "FAIL $name" }
 }
 
-if (-not (Test-Path $setup)) { Log "FAIL setup exe missing"; exit 1 }
+if (-not $Setup -or -not (Test-Path $Setup)) { Log "FAIL setup exe missing: $Setup"; exit 1 }
+Log ".. 被测安装包：$Setup（$(Get-Item $Setup).LastWriteTime）"
 
 function Get-UninstallString {
     $keys = @(
@@ -26,6 +33,43 @@ function Get-UninstallString {
     return $null
 }
 
+# ============ 任务栏安全网（2026-09-02 事故）：脚本中途被杀也绝不丢任务栏 ============
+# 之前无 try/finally：脚本在「2. 首跑」（应用已锁定、任务栏已隐藏）被中断时 finally 永不执行 →
+# 任务栏真实丢失（用户底线事故）。三重防护：
+#   1) try/finally 清场（对齐 verify-step12 的成熟结构）
+#   2) 每段结束立刻杀应用 + 校验任务栏可见，不等最后
+#   3) finally 里强制 TaskbarShow（Win32 ShowWindow），失败再重启 explorer
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public class TBGuard {
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr FindWindow(string c, string t);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  public static bool ShowTaskbar() {
+    var h = FindWindow("Shell_TrayWnd", null);
+    if (h == IntPtr.Zero) return false;
+    ShowWindow(h, 5);
+    return IsWindowVisible(h);
+  }
+}
+'@
+function Assert-Taskbar {
+    if (-not [TBGuard]::ShowTaskbar()) {
+        Log "WARN taskbar show failed — restarting explorer"
+        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) { Start-Process explorer }
+        Start-Sleep -Seconds 2
+    }
+}
+function Kill-App {
+    Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
+
+try {
+
 # ============ 清场（先卸旧的，没有就跳过） ============
 $us = Get-UninstallString
 if ($us) {
@@ -37,7 +81,7 @@ Check "清场：LocalAppData 数据被卸载清掉" (-not (Test-Path "$localData
 
 # ============ 1. 静默安装 ============
 Log "== 1. 静默安装 =="
-$p = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -PassThru -Wait
+$p = Start-Process $Setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -PassThru -Wait
 Check "安装进程退出码 0" ($p.ExitCode -eq 0)
 Check "exe 落地用户目录" (Test-Path "$userInstallDir\focus-desktop.exe")
 Check "安装目录无 portable.flag（走 LocalAppData 布局）" (-not (Test-Path "$userInstallDir\portable.flag"))
@@ -55,8 +99,8 @@ Check "首跑写出 config.json（configured:false 走向导）" (Test-Path "$lo
 $cfgText = ""
 if (Test-Path "$localData\config.json") { $cfgText = Get-Content "$localData\config.json" -Raw }
 Check "config 含 configured:false（向导待完成）" ($cfgText -match '"configured":\s*false')
-Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 800
+Kill-App
+Assert-Taskbar   # 段结束即校验（不等最后）——首跑轮 config 未 configured 时应用不锁定，但任何异常都当场恢复
 
 # 手动模拟用户完成向导（写 configured:true 的 v2 config——向导 UI 交互已在 T6 verify-setup 32/32 验过）
 $wizardDone = @'
@@ -81,7 +125,7 @@ Log ".. 模拟向导完成 + 学习目录 fixture 就绪"
 
 # ============ 3. 覆盖装（升级）：数据保留 ============
 Log "== 3. 覆盖装（升级）=="
-$p = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -PassThru -Wait
+$p = Start-Process $Setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -PassThru -Wait
 Check "覆盖装退出码 0" ($p.ExitCode -eq 0)
 Check "升级后 config 保留（configured:true 仍在）" ((Get-Content "$localData\config.json" -Raw) -match '"configured":\s*true')
 
@@ -98,12 +142,17 @@ Check "卸载后 LocalAppData 数据清除（重装=全新向导）" (-not (Test
 Check "卸载后桌面快捷方式移除" (-not (Test-Path "$desktop\Focus Desk.lnk"))
 Check "学习目录 fixture 原样（装/卸绝不碰）" (Test-Path "$fixtureDir\keep-me.txt")
 
-# ============ 清理 ============
-Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*focus-desktop-data*" -or $_.CommandLine -like "*LOCALAPPDATA*focus-desktop*" } | ForEach-Object {
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+}   # ============ try 结束 ============
+finally {
+    # 任务栏安全网（无条件执行——脚本中途被杀/异常都走这里）：杀残留进程 + 强制恢复任务栏
+    Log ".. finally：清场（杀进程 + 恢复任务栏）"
+    Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*focus-desktop-data*" -or $_.CommandLine -like "*LOCALAPPDATA*focus-desktop*" } | ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $fixtureDir) { Remove-Item $fixtureDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Assert-Taskbar
 }
-if (Test-Path $fixtureDir) { Remove-Item $fixtureDir -Recurse -Force }
 
 Log ("== RESULT: " + $script:pass + " pass / " + $script:fail + " fail ==")
 if ($script:fail -eq 0) { exit 0 } else { exit 1 }

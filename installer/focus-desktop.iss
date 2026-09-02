@@ -10,7 +10,7 @@
 #define AppName "Focus Desk"
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
-#define Version "1.0.1"
+#define Version "1.0.2"
 #define Publisher "Kevin Li (ai-lcs)"
 
 [Setup]
@@ -37,6 +37,13 @@ PrivilegesRequiredOverridesAllowed=commandline
 ; 未签名：SmartScreen 会提示（README FAQ 已说明）
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExeName}
+; 中文安装向导（单语种应用，不弹语言选择框）
+ShowLanguageDialog=no
+
+[languages]
+; 简中语言文件（MIT，kira-96 翻译）随仓库携带（installer/ChineseSimplified.isl）——
+; Inno 官方安装包不带中文，CI/他机构建不再依赖下载
+Name: "chinese"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
 ; publish 产物由 build-release.ps1 先输出到 installer\payload\

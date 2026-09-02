@@ -93,13 +93,6 @@
                     <ColumnDefinition Width="1*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 首页背景图（用户向导选图；很浅+暗化保证 UI 可读；加载成功才可见） -->
-                <Image x:Name="HomeBgImage" Grid.ColumnSpan="2"
-                       Stretch="UniformToFill" StretchDirection="Both"
-                       Opacity="0.22" IsHitTestVisible="False" Visibility="Collapsed"/>
-                <Border x:Name="HomeBgMask" Grid.ColumnSpan="2"
-                        Background="#99000000" IsHitTestVisible="False" Visibility="Collapsed"/>
-
                 <!-- 左列：时钟 + 日期 + 专注语卡片 + 快捷入口（紧凑分组，消除空洞感） -->
                 <StackPanel Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
                     <TextBlock x:Name="BigClock" Text="00:00"

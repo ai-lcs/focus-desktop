@@ -52,7 +52,6 @@ public partial class MainWindow : Window
 
         var cfg = AppSettings.LoadOrDefault();
         _firstRunWizardPending = !cfg.IsConfigured() && !cfg.IsLegacyConfig(); // F1：首配轮延迟预热
-        BackgroundImageService.ApplyTo(HomeBgImage, HomeBgMask, cfg.BackgroundImage); // T5：首页背景图（失败静默保持纯色）
         _filesRoot = cfg.StudyFolder;
         _currentDir = _filesRoot;
         InitSites(cfg); // Public v1：站点集/图标/有效域名全部由 SiteCatalog 从配置解析（不再硬编码）
@@ -184,6 +183,8 @@ public partial class MainWindow : Window
     /// 同步到当轮——注册表增删（懒加载：未激活的 tab 只删注册元数据，无控件可清）+ TabBar 重建
     /// + 首页快捷入口重建。已激活过的 WebView（用户在向导轮点开过网页）保留原控件，
     /// 其导航策略捕获的旧 cfg 在重启后按最终配置纠正（v1.0.1 已知边界）。
+    /// 2026-09-02 用户实测定罪（截图）：文件页路径/专注语/背景图同样停在提交前的默认值——
+    /// 一并当轮应用（文件根指向 config 的 studyFolder、专注语重读、背景图按落盘资产重铺）。
     /// </summary>
     private void ApplyCommittedConfig()
     {
@@ -201,6 +202,13 @@ public partial class MainWindow : Window
         }
         BuildTabBar();          // 按对齐后的注册表重建 Tab 条（含 home/files 固定页）
         BuildHomeSiteButtons(); // 首页快捷入口按最终站点集重建
+
+        // 提交后当轮刷新非站点面（截图实锤：文件页路径停在默认 Documents\Focus、专注语停在旧值）
+        _filesRoot = cfg.StudyFolder;
+        _currentDir = _filesRoot;
+        FocusQuote.Text = cfg.FocusQuote;
+        PomoControl.LoadConfig(cfg); // 番茄钟参数（v1.0.2 审计补：与站点/专注语同轮应用）
+        if (_activeTab == "files") RenderFiles(); // 当前正停在文件页时立即重渲染
     }
 
     private async Task WarmupAfterDelayAsync()
@@ -1115,7 +1123,7 @@ public partial class MainWindow : Window
     internal void ShowLoginHint() => ShowSetupHint();
 
     /// <summary>
-    /// 真预览（F2）：向导「预览首页」把瞬态草稿 cfg 应用到首页可见面（专注语/背景/快捷入口/番茄钟默认值/
+    /// 真预览（F2）：向导「预览首页」把瞬态草稿 cfg 应用到首页可见面（专注语/快捷入口/番茄钟默认值/
     /// 文件根）。瞬态实例 Save 被抑制，预览态不落盘、返回向导后由正式提交或重启覆盖。不触碰 Tab 栏/Web 层
     /// （站点标签在向导轮本就未注册进 TabBar，首轮白名单预热见 WarmupAfterDelayAsync 延迟逻辑）。
     /// </summary>
@@ -1128,25 +1136,6 @@ public partial class MainWindow : Window
         InitSites(cfg);
         BuildHomeSiteButtons();
         RenderFiles();
-    }
-
-    /// <summary>预览背景图：从用户选中的源路径直读（未导入 assets）。失败静默（保持现状）。</summary>
-    internal void ApplyBackgroundPreview(string sourcePath)
-    {
-        try
-        {
-            var bmp = new System.Windows.Media.Imaging.BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
-            bmp.DecodePixelWidth = 2560;
-            bmp.UriSource = new Uri(sourcePath);
-            bmp.EndInit();
-            bmp.Freeze();
-            HomeBgImage.Source = bmp;
-            HomeBgImage.Visibility = Visibility.Visible;
-            HomeBgMask.Visibility = Visibility.Visible;
-        }
-        catch { /* 解码失败保持现状 */ }
     }
 
     private void ShowSetupHint()

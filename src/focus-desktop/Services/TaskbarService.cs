@@ -79,6 +79,12 @@ public static class TaskbarService
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
                     // 第二种原语双保险（部分 Win11 版本只认其一）
                     ShowWindow(hwnd, SW_SHOW);
+                    // z 序复位（2026-09-02 用户实测事故第三层根因）：Hide/Show 循环或 explorer 异常
+                    // 后任务栏可能 visible=True 但被压到普通窗口之下（IsWindowVisible 全绿、屏幕上没有）。
+                    // HWND_TOPMOST→HWND_NOTOPMOST 循环把它提回正常 z 序顶端（置顶一瞬即降回，
+                    // 不会真常驻 topmost）。实测修复此形态。
+                    SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    SetWindowPos(hwnd, new IntPtr(-2), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 }
             }
 

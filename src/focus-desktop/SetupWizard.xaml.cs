@@ -30,7 +30,6 @@ public partial class SetupWizard : Window
     private readonly Dictionary<string, WpfCheckBox> _presetChecks = new(StringComparer.OrdinalIgnoreCase);
     private int _step = 1;
     private bool _completed;
-    private string? _bgSourcePath;            // 选中背景图的完整路径（提交时经 BackgroundImageService.Import 复制；config 只存文件名）
     private (int Work, int Short, int Long, int Cycles) _pomodoro = (25, 5, 15, 4);
     private Window? _returnButton;            // 「预览首页」时左上角的返回向导浮动窗
 
@@ -235,16 +234,14 @@ public partial class SetupWizard : Window
         Step1Panel.Visibility = step == 1 ? Visibility.Visible : Visibility.Collapsed;
         Step2Panel.Visibility = step == 2 ? Visibility.Visible : Visibility.Collapsed;
         Step3Panel.Visibility = step == 3 ? Visibility.Visible : Visibility.Collapsed;
-        Step4Panel.Visibility = step == 4 ? Visibility.Visible : Visibility.Collapsed;
 
         UpdateStepIndicator(Step1Indicator, step == 1);
         UpdateStepIndicator(Step2Indicator, step == 2);
         UpdateStepIndicator(Step3Indicator, step == 3);
-        UpdateStepIndicator(Step4Indicator, step == 4);
 
         BackButton.IsEnabled = step > 1;
         BackButton.Opacity = step > 1 ? 1.0 : 0.4;
-        PrimaryButton.Content = step == 4 ? "完成并开始使用" : "下一步";
+        PrimaryButton.Content = step == 3 ? "完成并开始使用" : "下一步";
     }
 
     private void UpdateStepIndicator(TextBlock tb, bool active)
@@ -264,8 +261,7 @@ public partial class SetupWizard : Window
         {
             case 1: if (ValidateStep1()) GoToStep(2); break;
             case 2: if (ValidateStep2()) GoToStep(3); break;
-            case 3: if (ValidateStep3()) GoToStep(4); break;
-            case 4: CommitAndFinish(); break;
+            case 3: if (ValidateStep3()) CommitAndFinish(); break; // v1.0.2：背景步骤已移除，专注设置即末步（校验仍生效）
         }
     }
 
@@ -273,9 +269,30 @@ public partial class SetupWizard : Window
 
     private bool ValidateStep1()
     {
-        if (FolderBox.Text.Trim().Length == 0)
+        var folder = FolderBox.Text.Trim();
+        if (folder.Length == 0)
         {
             ShowError(FolderError, "请选择一个学习文件夹。");
+            return false;
+        }
+        // 安全红线：学习目录绝不允许位于运行数据目录（%LOCALAPPDATA%\focus-desktop 或 portable 数据目录）
+        // 内/相等——卸载会 DelTree 整个数据目录，「绝不碰学习文件」的承诺会因此失效（v1.0.2 审计）。
+        try
+        {
+            var dataDir = System.IO.Path.GetFullPath(Paths.DataDir)
+                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+            var full = System.IO.Path.GetFullPath(folder)
+                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+            if (full.Equals(dataDir, StringComparison.OrdinalIgnoreCase)
+                || full.StartsWith(dataDir + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                ShowError(FolderError, "学习文件夹不能放在应用数据目录内（卸载时会连同清除）。请换一个位置。");
+                return false;
+            }
+        }
+        catch
+        {
+            ShowError(FolderError, "路径无法解析，请重新选择。");
             return false;
         }
         HideError(FolderError);
@@ -386,41 +403,6 @@ public partial class SetupWizard : Window
         RefreshCustomList();
     }
 
-    // ---------------- 第 4 步：背景 ----------------
-
-    private void ChooseBg_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "选择背景图片",
-            Filter = "图片文件 (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png",
-        };
-        if (dlg.ShowDialog(this) != true) return;
-        _bgSourcePath = dlg.FileName;
-        try
-        {
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad; // 不锁源文件（T5 会复制它）
-            bmp.UriSource = new Uri(dlg.FileName);
-            bmp.EndInit();
-            BgPreviewImage.Source = bmp;
-            BgPreviewImage.Visibility = Visibility.Visible;
-        }
-        catch
-        {
-            BgPreviewImage.Source = null;
-            BgPreviewImage.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private void ClearBg_Click(object sender, RoutedEventArgs e)
-    {
-        _bgSourcePath = null;
-        BgPreviewImage.Source = null;
-        BgPreviewImage.Visibility = Visibility.Collapsed;
-    }
-
     // ---------------- 预览首页（无副作用） ----------------
 
     private void Preview_Click(object sender, RoutedEventArgs e)
@@ -456,12 +438,7 @@ public partial class SetupWizard : Window
         preview.LoginDomains = ld;
 
         _previewCfg = preview;
-        if (Owner is MainWindow main)
-        {
-            main.ApplyConfigPreview(preview);
-            // 背景图：源文件直读（未导入 assets）——用户新选了用新图，没选保持现状
-            if (_bgSourcePath != null) main.ApplyBackgroundPreview(_bgSourcePath);
-        }
+        if (Owner is MainWindow main) main.ApplyConfigPreview(preview);
     }
 
     /// <summary>预览站点集：勾选 preset（id 引用）+ 草稿中已加 custom（引用语义，与提交同一份列表）。</summary>
@@ -543,14 +520,6 @@ public partial class SetupWizard : Window
             return;
         }
 
-        // 背景图：提交时才复制进 DataDir/assets（向导期间只存路径，原图留在用户处不受影响）
-        string? bgName = null;
-        if (_bgSourcePath != null)
-        {
-            bgName = BackgroundImageService.Import(_bgSourcePath);
-            // 导入失败（>50MB/复制异常）→ 放弃背景但不阻塞完成（静默回退纯色）
-        }
-
         var final = new AppSettings
         {
             SchemaVersion = 2,
@@ -562,7 +531,7 @@ public partial class SetupWizard : Window
             PomodoroShortBreakMinutes = _pomodoro.Short,
             PomodoroLongBreakMinutes = _pomodoro.Long,
             PomodoroCyclesUntilLong = _pomodoro.Cycles,
-            BackgroundImage = bgName,
+            BackgroundImage = null, // v1.0.2 背景图功能已移除（用户指示）：字段保留兼容旧 config 读取，不再写入
             Sites = new List<SiteCatalog.SiteEntry>(),
         };
         // 勾选的 preset（只存 id，域名真相在代码）+ 自定义条目（草稿里已含全字段）
