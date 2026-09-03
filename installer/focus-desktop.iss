@@ -10,7 +10,7 @@
 #define AppName "Focus Desk"
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
-#define Version "1.1.0"
+#define Version "1.1.1"
 #define Publisher "Kevin Li (ai-lcs)"
 
 [Setup]

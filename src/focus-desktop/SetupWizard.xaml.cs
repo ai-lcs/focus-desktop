@@ -16,7 +16,7 @@ namespace focus_desktop;
 
 /// <summary>
 /// Public v1 首次安装配置向导（3 步 + 底部导航）。
-/// 独立普通 Window，由 App 在启动时显示在 MainWindow 之上（不进锁定）。
+/// 独立普通 Window，由 App 在启动时单独显示；MainWindow 仅在预览或完成后显示（不进锁定）。
 /// 全程 GUI：草稿在内存，只有「完成并开始使用」才原子写 config.json；
 /// setup_done.flag 留给首页「开始专注」按钮，表示登录准备完成并允许进入锁定；
 /// 中途关闭应用不写任何配置，下次启动幂等重进向导。
@@ -27,6 +27,7 @@ public partial class SetupWizard : Window
     public event Action<AppSettings>? Completed;
 
     private readonly AppSettings _draft;      // 内存草稿（AppSettings.LoadOrDefault() 初始化，提交时才落盘）
+    private readonly MainWindow _main;
     private AppSettings? _previewCfg;         // 瞬态预览态（真预览 F2）：Save 被抑制，改动仅作用内存、预览后即弃
     private readonly Dictionary<string, WpfCheckBox> _presetChecks = new(StringComparer.OrdinalIgnoreCase);
     private int _step = 1;
@@ -44,10 +45,10 @@ public partial class SetupWizard : Window
         ["notebooklm"] = ("📔", "谷歌 AI 笔记本"),
     };
 
-    public SetupWizard(AppSettings draft, Window owner)
+    public SetupWizard(AppSettings draft, MainWindow main)
     {
         _draft = draft;
-        Owner = owner;
+        _main = main;
         InitializeComponent();
         InitDraftValues();
         BuildPresetCards();
@@ -432,6 +433,8 @@ public partial class SetupWizard : Window
         if (_step == 3 && !ValidateStep3()) return;
         PreviewDraft(); // 真预览（F2）：草稿态复制进瞬态预览态 → MainWindow 实时换肤；不写盘、可回退
         Hide();
+        _main.Show();
+        _main.Activate();
         ShowReturnButton();
     }
 
@@ -461,7 +464,7 @@ public partial class SetupWizard : Window
         preview.LoginDomains = ld;
 
         _previewCfg = preview;
-        if (Owner is MainWindow main) main.ApplyConfigPreview(preview);
+        _main.ApplyConfigPreview(preview);
     }
 
     /// <summary>预览站点集：勾选 preset（id 引用）+ 草稿中已加 custom（引用语义，与提交同一份列表）。</summary>
@@ -508,8 +511,8 @@ public partial class SetupWizard : Window
                 Background = Brushes.Transparent,
                 Width = 132,
                 Height = 44,
-                Left = (Owner?.Left ?? 0) + 16,
-                Top = (Owner?.Top ?? 0) + 14,
+                Left = _main.Left + 16,
+                Top = _main.Top + 14,
                 Content = host,
                 Title = "SetupBackToWizardButton",
             };
@@ -523,6 +526,7 @@ public partial class SetupWizard : Window
     private void ExitPreview()
     {
         _returnButton?.Hide();
+        _main.Hide();
         Show();
         Activate();
     }

@@ -93,6 +93,14 @@ Remove-Item $setupFlag -ErrorAction SilentlyContinue
 $p = Wait-App 8
 $next = FindById $p.Id "SetupNextButton"
 Check "wizard appears on fresh start" ($next -ne $null)
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$pidCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $p.Id)
+$topWindows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $pidCond)
+$visibleMain = $false
+foreach ($window in $topWindows) {
+    if ($window.Current.Name -eq "focus-desktop" -and -not $window.Current.IsOffscreen) { $visibleMain = $true }
+}
+Check "main stays hidden during first-run wizard" (-not $visibleMain)
 # 填到步骤3再杀：两步 Next
 if ($next -ne $null) {
     [void](Click-Id $p.Id "SetupNextButton"); Start-Sleep -Milliseconds 600

@@ -140,8 +140,6 @@ public partial class App : Application
             // 自动退出 timer 在 MainWindow.InitAsync 里（15 秒，含 Web 层初始化验证）
         }
 
-        main.Show();
-
         // 锁定策略：--smoke 永不锁；--preview 预览模式（不锁+普通窗口+直接退出）；
         // 首次配置（Configured != true 且非 legacy 老配置）→ 显示配置向导层（不锁）；
         // configured=true 但 setup_done 缺失 → 保持登录引导态，不提前锁定；
@@ -152,9 +150,12 @@ public partial class App : Application
             if (!settings.IsConfigured() && !legacy)
             {
                 ShowSetupWizard(settings);
-                App.SmokeLog("first-run setup wizard mode (no lock)");
+                App.SmokeLog("first-run setup wizard mode (main hidden, no lock)");
+                return;
             }
-            else if (!legacy && !FirstRunSetup.IsSetupComplete())
+
+            main.Show();
+            if (!legacy && !FirstRunSetup.IsSetupComplete())
             {
                 main.ShowLoginHint();
                 App.SmokeLog("configured setup pending; login guidance mode (no lock)");
@@ -164,9 +165,13 @@ public partial class App : Application
                 _focus.Enter(); // 真实模式：进锁定
             }
         }
+        else
+        {
+            main.Show();
+        }
     }
 
-    /// <summary>Public v1 首次配置向导：独立普通窗口（盖在 MainWindow 上；不保存、不进锁定）。</summary>
+    /// <summary>Public v1 首次配置向导：独立普通窗口（MainWindow 保持隐藏；不保存、不进锁定）。</summary>
     private void ShowSetupWizard(AppSettings draft)
     {
         var wizard = new SetupWizard(draft, (MainWindow)MainWindow);
@@ -182,6 +187,7 @@ public partial class App : Application
             try
             {
                 main.NotifyConfigCommitted(); // F1：首配轮预热延迟到此刻——最终配置已落盘，新 WebView 捕获新策略
+                main.Show();
                 main.ShowLoginHint(); // MainWindow 公开方法（直调，反射方案已否决——编译期可见性优于运行时绑定）
             }
             catch (Exception ex)
