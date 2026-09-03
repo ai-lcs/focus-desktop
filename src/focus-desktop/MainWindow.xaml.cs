@@ -88,7 +88,7 @@ public partial class MainWindow : Window
         FocusQuote.Text = cfg.FocusQuote;
 
         // 番茄钟（桌面版设计控件，自带环形进度/模式按钮/蜂鸣）
-        PomoControl.SetPreviewMode(options.Preview || options.Dev);
+        PomoControl.SetPreviewMode(options.Preview || options.Dev || _firstRunWizardPending);
         PomoControl.LoadConfig(cfg);
 
         // 时钟：顶栏小钟 + 首页大钟
@@ -173,6 +173,7 @@ public partial class MainWindow : Window
     {
         if (!_firstRunWizardPending) return;
         _firstRunWizardPending = false;
+        PomoControl.SetPreviewMode(false);
         ApplyCommittedConfig();
         _ = WarmupAfterDelayAsync();
     }
@@ -213,9 +214,12 @@ public partial class MainWindow : Window
 
     private async Task WarmupAfterDelayAsync()
     {
+        var pendingAtSchedule = _firstRunWizardPending;
         try
         {
-            await Task.Delay(_firstRunWizardPending ? FirstRunWarmupDelay : TimeSpan.FromMilliseconds(1500));
+            await Task.Delay(pendingAtSchedule ? FirstRunWarmupDelay : TimeSpan.FromMilliseconds(1500));
+            // 提交后已由 NotifyConfigCommitted 重新调度，丢弃首配轮的旧延迟任务。
+            if (pendingAtSchedule && !_firstRunWizardPending) return;
             if (_web == null || _hostPanel == null) return;
             // 预热期间若用户已点开网页 tab，跳过预热（激活路径已处理/懒加载兜底）
             if (_activeTab is not "home" and not "files") return;
@@ -292,8 +296,12 @@ public partial class MainWindow : Window
             _hostPanel = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Fill };
             WfHost.Child = _hostPanel;
 
-            foreach (var s in _sites)
-                _web.RegisterTab(s.TabKey, s.Title, s.Url);
+            // 向导提交前不注册站点 Tab；否则预览/默认站点会提前进入 WebView 生命周期。
+            if (!_firstRunWizardPending)
+            {
+                foreach (var s in _sites)
+                    _web.RegisterTab(s.TabKey, s.Title, s.Url);
+            }
 
             // 面板底色=主题深灰：折叠期/切换间隙露出的 WinForms 裸底色（默认
             // SystemColors.Control=#F0F0F0）就是切换白闪的来源之一（2026-08-31 视频实锤）
@@ -577,14 +585,24 @@ public partial class MainWindow : Window
         }
         items.Add(("files", "📂", "学习文件", () => NavOrOpen("files")));
 
-        // 行数 + UniformGrid 等宽列
+        // 按行放进居中的 StackPanel：最后一行不足 3 个时也保持整行居中。
+        HomeNavGrid.ColumnDefinitions.Clear();
         var rows = (items.Count + PerRow - 1) / PerRow;
         for (var r = 0; r < rows; r++)
-            HomeNavGrid.RowDefinitions.Add(new RowDefinition());
-
-        var row = 0; var col = 0;
-        foreach (var (key, icon, name, open) in items)
         {
+            HomeNavGrid.RowDefinitions.Add(new RowDefinition());
+            var rowPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            System.Windows.Controls.Grid.SetRow(rowPanel, r);
+            HomeNavGrid.Children.Add(rowPanel);
+        }
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var (key, icon, name, open) = items[i];
             var b = new WpfButton
             {
                 Style = (Style)FindResource("NavBtn"),
@@ -600,14 +618,9 @@ public partial class MainWindow : Window
             if (b.Content is string txt && txt.Length > 12)
                 b.Content = txt[..12];
             b.Click += (_, _) => open();
-            System.Windows.Controls.Grid.SetRow(b, row);
-            System.Windows.Controls.Grid.SetColumn(b, col);
-            HomeNavGrid.Children.Add(b);
-            col++;
-            if (col >= PerRow) { col = 0; row++; }
+            var row = i / PerRow;
+            ((StackPanel)HomeNavGrid.Children[row]).Children.Add(b);
         }
-        // 整组居中：网格本身在父 StackPanel 里水平居中（XAML HorizontalAlignment=Center），
-        // 网格宽度=列数×按钮宽（不拉伸占满列宽），行内不满时按钮仍从左排满已定义列。
     }
 
     /// <summary>"+"新建 Tab：弹出站点选择浮层（数据源 = 解析后的站点集，数据驱动）。</summary>
@@ -660,6 +673,11 @@ public partial class MainWindow : Window
     /// tab 被关掉后从「+」菜单重开即恢复原 id，避免动态站点多开 id 的持久化管理）。</summary>
     private async Task OpenNewSiteTabAsync(string baseId, string title, string url)
     {
+        if (_firstRunWizardPending)
+        {
+            ShowBlocked("请先完成首次配置");
+            return;
+        }
         if (_web == null || _hostPanel == null) return;
         var site = _sites.FirstOrDefault(s => s.TabKey == baseId);
         var allowMulti = site?.AllowMulti ?? true; // 查无此站（理论不到达）按旧语义放行
@@ -825,6 +843,11 @@ public partial class MainWindow : Window
         {
             ActivateTab("files");
             RenderFiles();
+            return;
+        }
+        if (_firstRunWizardPending)
+        {
+            ShowBlocked("请先完成首次配置");
             return;
         }
         var site = _sites.FirstOrDefault(s => s.TabKey == siteId);
@@ -1021,6 +1044,11 @@ public partial class MainWindow : Window
 
     private async void OpenFile(string path)
     {
+        if (_firstRunWizardPending)
+        {
+            ShowBlocked("请先完成首次配置");
+            return;
+        }
         var ext = Path.GetExtension(path).ToLowerInvariant();
         if (ext == ".pdf" || ext is ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" || ext is ".txt" or ".md")
         {

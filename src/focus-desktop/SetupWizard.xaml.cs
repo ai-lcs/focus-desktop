@@ -17,12 +17,13 @@ namespace focus_desktop;
 /// <summary>
 /// Public v1 首次安装配置向导（3 步 + 底部导航）。
 /// 独立全屏 Window，由 App 在启动时盖在 MainWindow 之上（不进锁定）。
-/// 全程 GUI：草稿在内存，只有「完成并开始使用」才原子写 config.json + setup_done.flag；
+/// 全程 GUI：草稿在内存，只有「完成并开始使用」才原子写 config.json；
+/// setup_done.flag 留给首页「开始专注」按钮，表示登录准备完成并允许进入锁定；
 /// 中途关闭应用不写任何配置，下次启动幂等重进向导。
 /// </summary>
 public partial class SetupWizard : Window
 {
-    /// <summary>向导已完成（config 已原子写入、setup_done.flag 已写）。App 层据此进入登录引导。</summary>
+    /// <summary>向导已完成（config 已原子写入）。App 层据此进入登录引导。</summary>
     public event Action<AppSettings>? Completed;
 
     private readonly AppSettings _draft;      // 内存草稿（AppSettings.LoadOrDefault() 初始化，提交时才落盘）
@@ -425,6 +426,8 @@ public partial class SetupWizard : Window
 
     private void Preview_Click(object sender, RoutedEventArgs e)
     {
+        // 第 3 步直接预览时也要先读取当前输入，避免用户刚改参数却沿用旧草稿值。
+        if (_step == 3 && !ValidateStep3()) return;
         PreviewDraft(); // 真预览（F2）：草稿态复制进瞬态预览态 → MainWindow 实时换肤；不写盘、可回退
         Hide();
         ShowReturnButton();
@@ -566,7 +569,8 @@ public partial class SetupWizard : Window
         final.LoginDomains = ld;
 
         final.Save();                   // 原子写 config.json（中途退出永不落盘）
-        FirstRunSetup.CompleteSetup();  // 保持 setup_done.flag 语义
+        // setup_done.flag 留到登录准备完成后由首页「开始专注」写入；
+        // configured=true 只表示配置已冻结，重启仍应停留在未锁定的登录引导态。
         _completed = true;
         Completed?.Invoke(final);
         Close();

@@ -104,7 +104,21 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         Redraw();
     }
 
-    public void SetPreviewMode(bool preview) => _previewMode = preview;
+    public void SetPreviewMode(bool preview)
+    {
+        if (_previewMode == preview) return;
+
+        // 首次向导预览期间硬性专注只画 UI，不应把状态带入正式运行态。
+        if (!preview && _hardWanted)
+        {
+            HardFocus.Release();
+            _hardWanted = false;
+            _svc.Reset();
+            _lastFinished = false;
+        }
+        _previewMode = preview;
+        Redraw();
+    }
 
     // ---------------- UI 构建 ----------------
 

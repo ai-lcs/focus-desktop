@@ -264,7 +264,7 @@ Check "config written atomically" ($cfgText -match '"configured":\s*true')
 Check "config schemaVersion 2" ($cfgText -match '"schemaVersion":\s*2')
 Check "config sites include presets" ($cfgText -match '"bili"' -and $cfgText -match '"deepseek"' -and $cfgText -match '"notebooklm"')
 Check "config sites include custom notion" ($cfgText -match 'notion\.so')
-Check "setup_done flag written" (Test-Path $setupFlag)
+Check "setup_done flag waits for start focus" (-not (Test-Path $setupFlag))
 $loginHint = $null
 try { $loginHint = FindById $pid1 "SetupNextButton" } catch { }
 # 向导关闭后 banner 出现（名字找）

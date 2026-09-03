@@ -85,12 +85,24 @@ public partial class App : Application
             _focus.Recover();
         }
 
-        // 配置：全新安装（config 不存在）才生成默认 config.json（含 Configured=false 标记——
-        // 默认 Whitelist 非空会被 IsLegacyConfig() 误判，显式 false 保证走向导）。
-        // 已存在的配置（含 legacy v1）原样不动：无条件 Save 会把 configured:false 等 v2 字段
-        // 混写进老文件，破坏 IsLegacyConfig() 的 Configured==null 判定（T6 实测定罪）。
-        var settings = AppSettings.LoadOrDefault();
-        if (!AppSettings.Exists())
+        // 配置：新安装写入 configured:false，避免默认白名单被误判为 legacy。
+        // 损坏配置先隔离原文件；即使隔离失败也不覆盖它，当前启动仍按未配置进入向导。
+        var settings = AppSettings.LoadOrDefault(out var configStatus);
+        if (configStatus == AppSettings.ConfigLoadStatus.Corrupt)
+        {
+            var backup = AppSettings.QuarantineCorruptConfig();
+            if (backup != null)
+            {
+                settings.Configured = false;
+                settings.Save();
+                SmokeLog($"config corrupt; quarantined to {backup}");
+            }
+            else
+            {
+                SmokeLog("config corrupt; quarantine failed; entering setup without overwrite");
+            }
+        }
+        else if (configStatus == AppSettings.ConfigLoadStatus.Missing)
         {
             settings.Configured = false;
             settings.Save();
@@ -107,15 +119,22 @@ public partial class App : Application
 
         main.Show();
 
-        // 锁定策略：--smoke 永不锁；--preview 预览模式（不锁+普通窗口+直接退出，给用户调配置用）；
-        // 首次配置（Configured != true 且非 legacy 老配置）→ 显示配置向导层（不锁，自由登录）；
-        // legacy 配置视为已配置（不进向导）；此后每次启动直接锁定
+        // 锁定策略：--smoke 永不锁；--preview 预览模式（不锁+普通窗口+直接退出）；
+        // 首次配置（Configured != true 且非 legacy 老配置）→ 显示配置向导层（不锁）；
+        // configured=true 但 setup_done 缺失 → 保持登录引导态，不提前锁定；
+        // legacy 配置视为已配置并直接锁定。
         if (!_options.Dev && !_options.Smoke && !_options.Preview)
         {
-            if (!settings.IsConfigured() && !settings.IsLegacyConfig())
+            var legacy = settings.IsLegacyConfig();
+            if (!settings.IsConfigured() && !legacy)
             {
                 ShowSetupWizard(settings);
                 App.SmokeLog("first-run setup wizard mode (no lock)");
+            }
+            else if (!legacy && !FirstRunSetup.IsSetupComplete())
+            {
+                main.ShowLoginHint();
+                App.SmokeLog("configured setup pending; login guidance mode (no lock)");
             }
             else
             {
@@ -132,7 +151,7 @@ public partial class App : Application
         wizard.Show();
     }
 
-    /// <summary>向导完成（config 已原子写入 + setup_done.flag 已写）→ 进入下一步：登录引导横幅。</summary>
+    /// <summary>向导完成（config 已原子写入）→ 进入下一步：登录引导横幅。</summary>
     private void OnSetupWizardCompleted(AppSettings finalConfig)
     {
         if (MainWindow is MainWindow main)

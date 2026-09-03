@@ -10,6 +10,8 @@ namespace focus_desktop.Services;
 /// </summary>
 public class AppSettings
 {
+    public enum ConfigLoadStatus { Missing, Valid, Corrupt }
+
     [JsonPropertyName("studyFolder")]
     public string StudyFolder { get; set; } =
         System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "focus");
@@ -63,7 +65,7 @@ public class AppSettings
     [JsonPropertyName("schemaVersion")]
     public int? SchemaVersion { get; set; }
 
-    /// <summary>首次向导已完成冻结标志。null/false=未完成（进向导）；true=正常运行。</summary>
+    /// <summary>首次向导已完成冻结标志。null/false=未完成（进向导）；true=配置已冻结。</summary>
     [JsonPropertyName("configured")]
     public bool? Configured { get; set; }
 
@@ -87,21 +89,49 @@ public class AppSettings
 
     public static bool Exists() => File.Exists(Paths.ConfigFile);
 
-    public static AppSettings LoadOrDefault()
+    public static AppSettings LoadOrDefault() => LoadOrDefault(out _);
+
+    public static AppSettings LoadOrDefault(out ConfigLoadStatus status)
     {
         try
         {
-            if (File.Exists(Paths.ConfigFile))
+            if (!File.Exists(Paths.ConfigFile))
             {
-                var cfg = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Paths.ConfigFile));
-                if (cfg != null) return cfg;
+                status = ConfigLoadStatus.Missing;
+                return new AppSettings();
+            }
+
+            var cfg = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Paths.ConfigFile));
+            // JSON 语法正确但关键集合被显式写成 null，同样不能当作可运行配置。
+            if (cfg != null && cfg.Whitelist != null && cfg.LoginDomains != null
+                && cfg.StudyFolder != null && cfg.ExitPhrase != null && cfg.FocusQuote != null)
+            {
+                status = ConfigLoadStatus.Valid;
+                return cfg;
             }
         }
         catch
         {
-            // 损坏的配置文件 → 回退默认值（Umbra Config 的容错模式）
+            // 继续走 Corrupt 分支：启动层会隔离原文件并进入向导，不直接锁定。
         }
-        return new AppSettings();
+        status = ConfigLoadStatus.Corrupt;
+        return new AppSettings { Configured = false };
+    }
+
+    /// <summary>隔离损坏配置，保留原文件供人工恢复；失败时不覆盖原文件。</summary>
+    public static string? QuarantineCorruptConfig()
+    {
+        try
+        {
+            if (!File.Exists(Paths.ConfigFile)) return null;
+            var backup = $"{Paths.ConfigFile}.corrupt-{DateTime.Now:yyyyMMdd-HHmmssfff}.json";
+            File.Move(Paths.ConfigFile, backup);
+            return backup;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public void Save()

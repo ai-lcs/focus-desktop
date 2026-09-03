@@ -5,8 +5,8 @@ namespace focus_desktop.Services;
 /// <summary>
 /// 首次运行 Setup 模式（spec §9）：
 /// - 首次启动（无 setup_done 标志）：不进锁定，用户自由登录四站/调整设置
-/// - 在 Setup 模式里点「开始专注」→ 写 setup_done → 立即进锁定
-/// - 之后每次启动：直接锁定
+/// - 配置提交后仍处于登录引导态；点「开始专注」→ 写 setup_done → 立即进锁定
+/// - setup_done 完成后每次启动：直接锁定
 /// setup_done 独立于 config.json（config 可能被手改，setup_done 只关心"用过了没有"）
 /// </summary>
 public static class FirstRunSetup
