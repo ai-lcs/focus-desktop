@@ -154,7 +154,7 @@ public partial class MainWindow : Window
         volTimer.Start();
     }
 
-    /// <summary>预热调度：启动 1.5s 后隐藏预热全部站（v0.5.2 起预热全程不可见——
+    /// <summary>预热调度：启动 0.3s 后隐藏预热全部站（v0.5.2 起预热全程不可见——
     /// 不再临时展开 WebHost，规避 19:28 视频回归的"首页上空白屏闪烁 1 秒"）。
     /// v0.5.1：预热恢复（v0.4.1h 因坏死被砍，但砍掉后首开重站/PDF 要 3-10s 盲等——
     /// 2026-08-31 视频里 PDF 首开 4s 黑白翻转就是此代价）。
@@ -217,13 +217,13 @@ public partial class MainWindow : Window
         var pendingAtSchedule = _firstRunWizardPending;
         try
         {
-            await Task.Delay(pendingAtSchedule ? FirstRunWarmupDelay : TimeSpan.FromMilliseconds(1500));
+            await Task.Delay(pendingAtSchedule ? FirstRunWarmupDelay : TimeSpan.FromMilliseconds(300));
             // 提交后已由 NotifyConfigCommitted 重新调度，丢弃首配轮的旧延迟任务。
             if (pendingAtSchedule && !_firstRunWizardPending) return;
             if (_web == null || _hostPanel == null) return;
-            // 预热期间若用户已点开网页 tab，跳过预热（激活路径已处理/懒加载兜底）
-            if (_activeTab is not "home" and not "files") return;
-            await _web.WarmupAllAsync(_hostPanel);
+            // 用户抢先点开网页时优先接续该 Tab 的创建，再错峰预热其余站点。
+            var preferredTab = _activeTab is not "home" and not "files" ? _activeTab : null;
+            await _web.WarmupAllAsync(_hostPanel, preferredTab);
         }
         catch (Exception ex)
         {
@@ -310,7 +310,7 @@ public partial class MainWindow : Window
             BuildTabBar();
             BuildHomeSiteButtons(); // 首页快捷入口按解析出的站点动态生成（v0.5.x 为 XAML 硬编码四站）
 
-            // 预热（v0.5.2 隐藏形态）：启动 1.5s 后错峰逐个建控件+导航，全程不可见。
+            // 预热（v0.5.2 隐藏形态）：启动 0.3s 后错峰逐个建控件+导航，全程不可见。
             // 首开站/PDF 时页面已就绪 —— 消除首开 3-10s 盲等（2026-08-31 视频 PDF 首开 4s 实锤）。
             // 安全形态：控件以 Visible=false 创建（先于入宿主；坏死陷阱触发条件是
             // 「折叠宿主内创建 visible=true 子控件」，隐藏子控件不在其列），宿主保持 Collapsed。
@@ -799,6 +799,7 @@ public partial class MainWindow : Window
 
     private async void ActivateTab(string id)
     {
+        var previousTab = _activeTab;
         _activeTab = id;
 
         // 死 id 兜底（如冒泡点击已关闭的 Tab）：回首页，绝不留空白屏
@@ -808,38 +809,48 @@ public partial class MainWindow : Window
             ActivateTab("home");
             return;
         }
-        ApplyTabVisibility(id);
-
         // 懒加载：首次激活才真正创建 WebView2 控件。
-        // 创建等待期先隐藏全部网页控件（否则旧页面挂着 = Tab/内容不一致的"卡住"观感）。
         if (isWeb && _web != null && _hostPanel != null)
         {
             var info = _web.Tabs.First(t => t.Id == id);
             if (info.View == null)
             {
-                // v0.4.1 z-order 架构：创建等待期保留旧内容可见（浏览器行为），
-                // 不再隐藏全部网页控件——隐藏会触发 Chromium 休眠，正是卡顿根源
+                // 首次创建期间保留当前内容，避免把尚未就绪的 WebHost 黑底直接暴露给用户。
                 if (_tabButtons.TryGetValue(id, out var btn0) && btn0.Content is Border b0
                     && b0.Child is System.Windows.Controls.Grid g0 && g0.Children[0] is StackPanel s0
                     && s0.Children[0] is TextBlock t0)
                     t0.Text = "加载中…";
-                try { await _web.EnsureTabAsync(id, _hostPanel); }
+                RefreshTabVisuals();
+                var created = false;
+                try
+                {
+                    var ensured = await _web.EnsureTabAsync(id, _hostPanel);
+                    created = ensured.View != null;
+                }
                 catch (Exception ex)
                 {
                     ShowBlocked($"网页组件启动失败：{ex.Message}");
                     CrashReporter.Write(ex, $"lazy-tab-{id}");
                 }
-                if (_activeTab != id) return; // 已切走：不动可见性（另一次 ActivateTab 负责最终状态）
-                if (_tabButtons.TryGetValue(id, out var btn1) && btn1.Content is Border b1
+                var restored = _web.Tabs.FirstOrDefault(t => t.Id == id);
+                if (restored != null && _tabButtons.TryGetValue(id, out var btn1) && btn1.Content is Border b1
                     && b1.Child is System.Windows.Controls.Grid g1 && g1.Children[0] is StackPanel s1
                     && s1.Children[0] is TextBlock t1)
-                    t1.Text = _web.Tabs.First(t => t.Id == id).Title; // 恢复标题
-                // 创建完成：把控件提到最前（上面分支走 else 未提）。此时再闪遮罩无意义——
-                // 页面已就绪，直接显示；Switched(true) 已在上面创建期分支闪过一次作为等待反馈。
-                _web.Activate(id);
+                    t1.Text = restored.Title; // 恢复标题（创建期间标签可能已被用户关闭）
+                if (_activeTab != id) return; // 已切走：不动可见性（另一次 ActivateTab 负责最终状态）
+                if (!created)
+                {
+                    var fallback = previousTab != id && _tabButtons.ContainsKey(previousTab) ? previousTab : "home";
+                    _activeTab = fallback;
+                    ApplyTabVisibility(fallback);
+                    _web.Activate(fallback);
+                    RefreshTabVisuals();
+                    return;
+                }
             }
         }
 
+        ApplyTabVisibility(id);
         if (isWeb) _everActivated.Add(id);
         _web?.Activate(id);
         RefreshTabVisuals();

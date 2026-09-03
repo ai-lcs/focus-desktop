@@ -135,9 +135,13 @@ public sealed class WebTabService : IDisposable
     /// v0.5.2 定论：坏死陷阱的触发条件是「折叠宿主内创建 visible=true 子控件」，与宿主
     /// 折叠无关的是控件自身的可见性——控件以隐藏形态创建即安全（Tauri/wry 同款），
     /// 因此宿主可保持 Collapsed，预热完全不可见。首开激活由 Activate 显式 Resume+显示。</summary>
-    public async Task WarmupAllAsync(System.Windows.Forms.Control host)
+    public async Task WarmupAllAsync(System.Windows.Forms.Control host, string? preferredId = null)
     {
-        foreach (var t in _tabs.ToList())
+        var pending = _tabs.ToList();
+        if (!string.IsNullOrEmpty(preferredId))
+            pending = pending.OrderByDescending(t => t.Id == preferredId).ToList();
+
+        foreach (var t in pending)
         {
             if (t.View != null) continue;
             try
