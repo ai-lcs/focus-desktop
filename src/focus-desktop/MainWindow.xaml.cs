@@ -64,8 +64,8 @@ public partial class MainWindow : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = 0;
         Top = 0;
-        // 预览模式：普通可切换窗口（不置顶、不覆盖全屏体验），给用户调配置用
-        if (options.Preview)
+        // 预览/首次配置：普通可切换窗口，方便用户在浏览器中复制网址。
+        if (options.Preview || _firstRunWizardPending)
         {
             Topmost = false;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -1311,6 +1311,8 @@ public partial class MainWindow : Window
             FirstRunSetup.CompleteSetup();
             banner.Visibility = Visibility.Collapsed;
             _focus.Enter(); // 从这一刻起锁定
+            Topmost = true;
+            WindowState = WindowState.Maximized;
             ShowBlocked("已进入专注模式");
         };
         sp.Children.Add(startBtn);

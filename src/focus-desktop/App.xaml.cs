@@ -146,7 +146,7 @@ public partial class App : Application
         }
     }
 
-    /// <summary>Public v1 首次配置向导：独立全屏覆盖层（盖在 MainWindow 上；不保存、不进锁定）。</summary>
+    /// <summary>Public v1 首次配置向导：独立普通窗口（盖在 MainWindow 上；不保存、不进锁定）。</summary>
     private void ShowSetupWizard(AppSettings draft)
     {
         var wizard = new SetupWizard(draft, (MainWindow)MainWindow);

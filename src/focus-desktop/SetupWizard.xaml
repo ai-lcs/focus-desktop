@@ -2,14 +2,16 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="focus-desktop 首次配置"
-        WindowStyle="None"
-        ResizeMode="NoResize"
-        ShowInTaskbar="False"
-        WindowStartupLocation="Manual"
-        Left="0"
-        Top="0"
-        Topmost="True"
-        WindowState="Maximized"
+        WindowStyle="SingleBorderWindow"
+        ResizeMode="CanResize"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterOwner"
+        Topmost="False"
+        WindowState="Normal"
+        Width="1080"
+        Height="720"
+        MinWidth="900"
+        MinHeight="600"
         Background="#23262C"
         Foreground="#F0F4FF"
         UseLayoutRounding="True">
@@ -44,12 +46,54 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
-        <!-- 主按钮：金色底深色字（NavBtn 为应用级样式，先于本窗口加载） -->
-        <Style x:Key="WzPrimaryBtn" TargetType="Button" BasedOn="{StaticResource NavBtn}">
-            <Setter Property="Background" Value="#F5C542"/>
-            <Setter Property="Foreground" Value="#202124"/>
-            <Setter Property="BorderBrush" Value="#F5C542"/>
-            <Setter Property="FontWeight" Value="Bold"/>
+        <!-- 向导底部按钮：圆角更柔和，主操作只保留一个强调色。 -->
+        <ControlTemplate x:Key="WzFooterButtonTemplate" TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="10"
+                    Padding="{TemplateBinding Padding}"
+                    Opacity="{TemplateBinding Opacity}">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                  RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.88"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Opacity" Value="0.74"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.42"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <Style x:Key="WzFooterBtn" TargetType="Button">
+            <Setter Property="Background" Value="#30353D"/>
+            <Setter Property="Foreground" Value="{StaticResource WzText}"/>
+            <Setter Property="BorderBrush" Value="#545D6A"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Padding" Value="20,9"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template" Value="{StaticResource WzFooterButtonTemplate}"/>
+        </Style>
+
+        <!-- 主按钮：低饱和金色底深色字，和深色背景形成清晰但不刺眼的层级。 -->
+        <Style x:Key="WzPrimaryBtn" TargetType="Button" BasedOn="{StaticResource WzFooterBtn}">
+            <Setter Property="Background" Value="#F1C44A"/>
+            <Setter Property="Foreground" Value="#25282D"/>
+            <Setter Property="BorderBrush" Value="#F1C44A"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="24,9"/>
+            <Setter Property="MinWidth" Value="112"/>
         </Style>
     </Window.Resources>
 
@@ -57,7 +101,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="64"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="92"/>
+            <RowDefinition Height="82"/>
         </Grid.RowDefinitions>
 
         <!-- 顶部：步骤指示（当前步高亮） -->
@@ -216,19 +260,20 @@
         </Grid>
 
         <!-- 底部：导航 -->
-        <Border Grid.Row="2" Background="#26292E" BorderBrush="{StaticResource WzCardBorder}" BorderThickness="0,1,0,0">
-            <Grid Margin="48,0">
+        <Border Grid.Row="2" Background="#26292E" BorderBrush="{StaticResource WzCardBorder}" BorderThickness="0,1,0,0" Padding="28,12">
+            <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Button x:Name="BackButton" Grid.Column="0" Style="{StaticResource NavBtn}" Content="← 返回上一步" AutomationProperties.AutomationId="SetupBackButton"
-                        Padding="22,10" FontSize="14" HorizontalAlignment="Left" Click="Back_Click" IsEnabled="False"/>
-                <Button x:Name="PreviewButton" Grid.Column="1" Style="{StaticResource NavBtn}" Content="预览首页" AutomationProperties.AutomationId="SetupPreviewButton"
-                        Padding="26,10" FontSize="14" Click="Preview_Click" Cursor="Hand"/>
-                <Button x:Name="PrimaryButton" Grid.Column="2" Style="{StaticResource WzPrimaryBtn}" Content="下一步" AutomationProperties.AutomationId="SetupNextButton"
-                        Padding="28,10" FontSize="15" HorizontalAlignment="Right" Click="Primary_Click" Cursor="Hand"/>
+                <Button x:Name="BackButton" Grid.Column="0" Style="{StaticResource WzFooterBtn}" Content="← 返回上一步" AutomationProperties.AutomationId="SetupBackButton"
+                        Padding="18,9" HorizontalAlignment="Left" Click="Back_Click" IsEnabled="False"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="PreviewButton" Style="{StaticResource WzFooterBtn}" Content="预览首页" AutomationProperties.AutomationId="SetupPreviewButton"
+                            MinWidth="104" Click="Preview_Click"/>
+                    <Button x:Name="PrimaryButton" Style="{StaticResource WzPrimaryBtn}" Content="下一步" AutomationProperties.AutomationId="SetupNextButton"
+                            Margin="12,0,0,0" Click="Primary_Click"/>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>
