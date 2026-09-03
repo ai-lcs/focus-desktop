@@ -46,8 +46,9 @@ public static class SiteCatalog
                 new[] { "accounts.google.com" }, true, true),
             ["deepseek"] = new("deepseek", "deepseek", "DeepSeek", "https://chat.deepseek.com",
                 new[] { "deepseek.com" }, Array.Empty<string>(), true, true),
-            // v1.0.3：NotebookLM 升为第 5 preset（用户 2026-09-03 指示，社区反馈）。tab/首页短名 NotebookLM。
-            ["notebooklm"] = new("notebooklm", "notebooklm", "NotebookLM", "https://notebooklm.google.com",
+            // v1.0.3：NotebookLM 升为第 5 preset（用户 2026-09-03 指示，社区反馈）。
+            // v1.0.4：Title=Notebook（tab 定宽 60px 下 NotebookLM 截断成 notebookl，用户指示缩短）。
+            ["notebooklm"] = new("notebooklm", "notebooklm", "Notebook", "https://notebooklm.google.com",
                 new[] { "notebooklm.google.com" }, new[] { "accounts.google.com" }, true, true),
         };
 

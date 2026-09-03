@@ -522,12 +522,13 @@ public partial class MainWindow : Window
         };
 
     /// <summary>首页快捷入口显示名（v0.5.4 同款英文短名——中文长名四按钮超 480px 列宽会折行成
-    /// 3+1+1 不对称布局，用户 2026-09-02「对称美学」指示恢复上一版排布）。tab 栏仍用中文短名。</summary>
+    /// 3+1+1 不对称布局，用户 2026-09-02「对称美学」指示恢复上一版排布）。tab 栏仍用中文短名。
+    /// v1.0.4：notebooklm 显示名 Notebook（用户指示——tab 定宽下 NotebookLM 会被截断成 notebookl）。</summary>
     private static readonly IReadOnlyDictionary<string, string> HomeSiteNames =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["bili"] = "Bilibili", ["chatgpt"] = "ChatGPT", ["aistudio"] = "AI Studio",
-            ["gemini"] = "Gemini", ["deepseek"] = "DeepSeek", ["notebooklm"] = "NotebookLM",
+            ["gemini"] = "Gemini", ["deepseek"] = "DeepSeek", ["notebooklm"] = "Notebook",
         };
 
     /// <summary>

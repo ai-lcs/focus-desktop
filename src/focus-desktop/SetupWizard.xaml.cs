@@ -33,13 +33,14 @@ public partial class SetupWizard : Window
     private (int Work, int Short, int Long, int Cycles) _pomodoro = (25, 5, 15, 4);
     private Window? _returnButton;            // 「预览首页」时左上角的返回向导浮动窗
 
-    /// <summary>preset 展示元数据（图标 + 一句话描述）。</summary>
+    /// <summary>preset 展示元数据（图标 + 一句话描述）。v1.0.4：notebooklm 补图标（📔）与描述。</summary>
     private static readonly Dictionary<string, (string Icon, string Desc)> PresetMeta = new(StringComparer.OrdinalIgnoreCase)
     {
         ["bili"] = ("🎬", "学习视频与课程"),
         ["chatgpt"] = ("💬", "AI 对话助手"),
         ["gemini"] = ("✨", "谷歌 AI 工作台"),
         ["deepseek"] = ("🐋", "深度求索 AI 助手"),
+        ["notebooklm"] = ("📔", "谷歌 AI 笔记本"),
     };
 
     public SetupWizard(AppSettings draft, Window owner)
@@ -83,6 +84,8 @@ public partial class SetupWizard : Window
                         SiteCatalog.NormalizeDomain(w), SiteCatalog.NormalizeDomain(d))));
             }
             _presetChecks[id] = card;
+            // v1.0.4：Grid 五列布局（PresetPanel 已是 5 列等宽 Grid），按索引摆列
+            System.Windows.Controls.Grid.SetColumn(card, PresetPanel.Children.Count);
             PresetPanel.Children.Add(card);
         }
     }
@@ -95,7 +98,8 @@ public partial class SetupWizard : Window
     {
         var card = new Border
         {
-            Width = 248,
+            // v1.0.4：五卡一行（SharedSizeGroup 等宽列）——去定宽，改 MinWidth + 拉伸填充列
+            MinWidth = 170,
             Height = 118,
             CornerRadius = new CornerRadius(12),
             BorderBrush = MakeBrush("#4A505A"),
@@ -142,9 +146,11 @@ public partial class SetupWizard : Window
         {
             Content = card,
             IsChecked = true,
-            Margin = new Thickness(4),
+            Margin = new Thickness(3),
             Cursor = Cursors.Hand,
             Foreground = (Brush)FindResource("WzText"),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = System.Windows.HorizontalAlignment.Stretch,
         };
         // T6 UIA 契约：preset 勾选框显式 id（SetupPreset_<tabkey>）
         System.Windows.Automation.AutomationProperties.SetAutomationId(check, $"SetupPreset_{def.TabKey}");
