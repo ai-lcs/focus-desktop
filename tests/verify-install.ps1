@@ -1,4 +1,5 @@
-﻿# verify-install.ps1 — T10: 安装包真机三态回归（静默装 → 首跑落 LocalAppData → 覆盖装保数据 → 卸载清数据/保学习目录）
+﻿# verify-install.ps1 — T10: 安装包真机三态回归（静默装 → 首跑落 LocalAppData → 覆盖装保数据 → 静默卸载保数据/保学习目录）
+# v1.0.9：交互卸载默认保留；静默卸载无法询问，同样默认保留用户数据。
 # 前提：installer/build-release.ps1 已产出 release\FocusDesktop-Setup-<version>.exe
 # Setup 路径动态推导（v1.0.2 审计修复：此前写死 1.0.0，版本升级后跑的是磁盘残留旧包 = 假绿）：
 #   优先取仓库 release\ 下最新的 FocusDesktop-Setup-*.exe（时间戳最新），也可用 -Setup 参数显式指定。
@@ -77,7 +78,10 @@ if ($us) {
     Start-Process cmd -ArgumentList "/c", "`"$us`" /VERYSILENT /SUPPRESSMSGBOXES" -Wait -WindowStyle Hidden
     Start-Sleep -Seconds 3
 }
-Check "清场：LocalAppData 数据被卸载清掉" (-not (Test-Path "$localData\config.json"))
+# v1.0.9 安全语义：卸载器默认保留数据；测试开始前显式清理自己的 fixture。
+Remove-Item "$localData\config.json" -ErrorAction SilentlyContinue
+Remove-Item "$localData\setup_done.flag" -ErrorAction SilentlyContinue
+Check "清场：测试配置已移除" (-not (Test-Path "$localData\config.json"))
 
 # ============ 1. 静默安装 ============
 Log "== 1. 静默安装 =="
@@ -129,7 +133,7 @@ $p = Start-Process $Setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NO
 Check "覆盖装退出码 0" ($p.ExitCode -eq 0)
 Check "升级后 config 保留（configured:true 仍在）" ((Get-Content "$localData\config.json" -Raw) -match '"configured":\s*true')
 
-# ============ 4. 静默卸载：数据清除 + 学习目录原样 ============
+# ============ 4. 静默卸载：默认保留数据 + 学习目录原样 ============
 Log "== 4. 静默卸载 =="
 $us = Get-UninstallString
 Check "卸载入口存在" ($us -ne $null)
@@ -138,7 +142,7 @@ if ($us) {
     Start-Sleep -Seconds 4
 }
 Check "卸载后 exe 移除" (-not (Test-Path "$userInstallDir\focus-desktop.exe"))
-Check "卸载后 LocalAppData 数据清除（重装=全新向导）" (-not (Test-Path "$localData\config.json"))
+Check "静默卸载后 LocalAppData 数据默认保留" ((Get-Content "$localData\config.json" -Raw -ErrorAction SilentlyContinue) -match '"configured":\s*true')
 Check "卸载后桌面快捷方式移除" (-not (Test-Path "$desktop\Focus Desk.lnk"))
 Check "学习目录 fixture 原样（装/卸绝不碰）" (Test-Path "$fixtureDir\keep-me.txt")
 
@@ -149,6 +153,14 @@ finally {
     Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*focus-desktop-data*" -or $_.CommandLine -like "*LOCALAPPDATA*focus-desktop*" } | ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    # 静默卸载现在默认保留数据；只在确认仍是本脚本写入的 fixture 配置时清理测试数据。
+    $testCfgPath = Join-Path $localData "config.json"
+    if (Test-Path $testCfgPath) {
+        try {
+            $testCfg = Get-Content $testCfgPath -Raw | ConvertFrom-Json
+            if ($testCfg.studyFolder -eq $fixtureDir) { Remove-Item $localData -Recurse -Force }
+        } catch { Log "WARN 测试数据无法安全识别，已保留：$localData" }
     }
     if (Test-Path $fixtureDir) { Remove-Item $fixtureDir -Recurse -Force -ErrorAction SilentlyContinue }
     Assert-Taskbar

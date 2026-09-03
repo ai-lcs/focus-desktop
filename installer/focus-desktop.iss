@@ -4,7 +4,7 @@
 ; 关键语义：
 ;  - 装到 {autopf}\FocusDesk（Program Files）；无 portable.flag → 运行数据落 %LOCALAPPDATA%\focus-desktop
 ;  - 升级：覆盖装（AppId 固定），LocalAppData 数据天然保留
-;  - 卸载：确认后清 %LOCALAPPDATA%\focus-desktop（重装=全新向导）；绝不触碰 config 里的 StudyFolder
+;  - 卸载：开始前明确询问，默认保留 %LOCALAPPDATA%\focus-desktop；仅确认后删除；绝不触碰 StudyFolder
 ;  - 快捷方式：桌面 + 开始菜单；「恢复」入口指向 --restore
 
 #define AppName "Focus Desk"
@@ -66,6 +66,9 @@ Type: files; Name: "{app}\{#AppExeName}"
 const
   LocalDataDir = 'focus-desktop';
 
+var
+  RemoveUserData: Boolean;
+
 function LocalAppDataPath(): String;
 begin
   Result := ExpandConstant('{localappdata}');
@@ -74,33 +77,22 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;
-  RemoveData: Boolean;
-  KeepData: String;
 begin
-  if CurUninstallStep = usPostUninstall then
+  DataDir := AddBackslash(LocalAppDataPath()) + LocalDataDir;
+
+  if CurUninstallStep = usUninstall then
   begin
-    DataDir := AddBackslash(LocalAppDataPath()) + LocalDataDir;
-    if DirExists(DataDir) then
-    begin
-      // 静默卸载（/VERYSILENT，T10 自动化）默认删数据 = 「重装=全新向导」承诺；
-      // 交互卸载弹确认框（用户可保留）。保留场景：注册表 Software\FocusDesk\Uninstall\KeepData=1。
-      if UninstallSilent() then
-      begin
-        if RegQueryStringValue(HKCU, 'Software\FocusDesk\Uninstall', 'KeepData', KeepData) and (KeepData = '1') then
-          RemoveData := False
-        else
-          RemoveData := True;
-      end
-      else
-        RemoveData := MsgBox(
-          '是否同时删除用户数据（配置、网站登录态、背景图）？' + #13#10 +
-          '选择「是」= 彻底清理（重新安装会重新出现首次配置向导）；' + #13#10 +
-          '选择「否」= 保留（重新安装后沿用现有配置）。',
-          mbConfirmation, MB_YESNO) = IDYES;
-      if RemoveData then
-      begin
-        DelTree(DataDir, True, True, True);
-      end;
-    end;
+    // 安全默认值：交互提示的默认按钮为「否」；静默卸载无法询问，也一律保留。
+    RemoveUserData := False;
+    if DirExists(DataDir) and (not UninstallSilent()) then
+      RemoveUserData := MsgBox(
+        '是否同时删除用户数据（配置、网站登录态、背景图）？' + #13#10 +
+        '选择「是」= 彻底清理（重新安装会重新出现首次配置向导）；' + #13#10 +
+        '选择「否」= 保留（重新安装后沿用现有配置）。',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  end
+  else if (CurUninstallStep = usPostUninstall) and RemoveUserData and DirExists(DataDir) then
+  begin
+    DelTree(DataDir, True, True, True);
   end;
 end;
