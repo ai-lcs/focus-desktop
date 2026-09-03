@@ -27,15 +27,18 @@ public partial class App : Application
         {
             try { TaskbarService.Show(); } catch { }
             try { RecoveryService.MarkClean(); } catch { }
-            foreach (var process in System.Diagnostics.Process.GetProcessesByName("focus-desktop"))
+            foreach (var processName in new[] { "focus-desktop", WatchdogService.ProcessName })
             {
-                try
+                foreach (var process in System.Diagnostics.Process.GetProcessesByName(processName))
                 {
-                    if (process.Id != Environment.ProcessId)
-                        process.Kill(entireProcessTree: true);
+                    try
+                    {
+                        if (process.Id != Environment.ProcessId)
+                            process.Kill(entireProcessTree: true);
+                    }
+                    catch { }
+                    finally { process.Dispose(); }
                 }
-                catch { }
-                finally { process.Dispose(); }
             }
             Environment.Exit(0);
             return;

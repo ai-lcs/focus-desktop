@@ -10,7 +10,9 @@
 #define AppName "Focus Desk"
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
-#define Version "1.1.1"
+#ifndef Version
+#define Version "1.1.2"
+#endif
 #define Publisher "Kevin Li (ai-lcs)"
 
 [Setup]
@@ -65,6 +67,7 @@ Filename: "{app}\{#AppExeName}"; Parameters: "--prepare-uninstall"; Flags: runhi
 [UninstallDelete]
 ; 只删安装目录自身文件（用户数据在 LocalAppData，见 [Code] 段确认式删除）
 Type: files; Name: "{app}\{#AppExeName}"
+Type: files; Name: "{app}\focus-desktop-watchdog.exe"
 
 [Code]
 const

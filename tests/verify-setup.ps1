@@ -2,6 +2,21 @@
 # 运行前提：release exe 已构建。测试全程操作临时 DataDir 副本，结束恢复 Kevin 真实 config。
 $ErrorActionPreference = "Continue"
 Add-Type -AssemblyName UIAutomationClient
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class SetupTaskbarGuard {
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    public static bool ShowTaskbar() {
+        var h = FindWindow("Shell_TrayWnd", null);
+        if (h == IntPtr.Zero) return false;
+        ShowWindow(h, 5);
+        return IsWindowVisible(h);
+    }
+}
+"@
 
 $repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $exe = Join-Path $repo "release\focus-desktop\focus-desktop.exe"
@@ -10,8 +25,10 @@ $cfg = Join-Path $dataDir "config.json"
 $setupFlag = Join-Path $dataDir "setup_done.flag"
 $backupCfg = "$env:LOCALAPPDATA\Temp\fd-config-backup.json"
 $backupFlag = "$env:LOCALAPPDATA\Temp\fd-setupflag-backup"
+$watchdogAlias = Join-Path (Split-Path $exe) "focus-desktop-watchdog.exe"
 
 $script:pass = 0; $script:fail = 0
+$script:appPids = @{}
 function Log($m) { Write-Output $m }
 function Check($name, $cond) {
     if ($cond) { $script:pass++; Log "PASS $name" } else { $script:fail++; Log "FAIL $name" }
@@ -22,8 +39,23 @@ if (Test-Path $cfg) { Copy-Item $cfg $backupCfg -Force } else { Remove-Item $bac
 if (Test-Path $setupFlag) { Copy-Item $setupFlag $backupFlag -Force } else { Remove-Item $backupFlag -ErrorAction SilentlyContinue }
 
 function Kill-App {
-    Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Milliseconds 600
+    foreach ($appProcessId in @($script:appPids.Keys)) {
+        Stop-Process -Id $appProcessId -Force -ErrorAction SilentlyContinue
+        [void]$script:appPids.Remove($appProcessId)
+    }
+    # 专注态主进程被强杀后，保留独立 watchdog 至少一个轮询周期，让它完成恢复。
+    Start-Sleep -Milliseconds 2500
+}
+
+function Stop-TestProcesses {
+    $testPaths = @([IO.Path]::GetFullPath($exe), [IO.Path]::GetFullPath($watchdogAlias))
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and ($testPaths -contains [IO.Path]::GetFullPath($_.ExecutablePath)) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Show-Taskbar {
+    [void][SetupTaskbarGuard]::ShowTaskbar()
 }
 
 function Get-Win($procId) {
@@ -76,6 +108,7 @@ function Get-Text($procId, $id) {
 # Wait-App 必须在函数定义之后（原位删除）
 function Wait-App($secs) {
     $p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+    $script:appPids[$p.Id] = $true
     Start-Sleep -Seconds $secs
     # 等窗口真起来（单文件首跑要自解压本机库，固定 sleep 不够）：轮询 UIA 主窗口至 secs 上限
     $deadline = (Get-Date).AddSeconds($secs)
@@ -85,6 +118,11 @@ function Wait-App($secs) {
     }
     return $p
 }
+
+try {
+Show-Taskbar
+Stop-TestProcesses
+Show-Taskbar
 
 # ============ 11. 中途强杀幂等（先做：不依赖向导 UI 交互） ============
 Kill-App
@@ -106,7 +144,8 @@ if ($next -ne $null) {
     [void](Click-Id $p.Id "SetupNextButton"); Start-Sleep -Milliseconds 600
     [void](Click-Id $p.Id "SetupNextButton"); Start-Sleep -Milliseconds 600
 }
-Stop-Process -Id $p.Id -Force
+Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+[void]$script:appPids.Remove($p.Id)
 Start-Sleep -Milliseconds 500
 $noHalf = -not (Test-Path $cfg) -or -not ((Get-Content $cfg -Raw -ErrorAction SilentlyContinue) -match '"configured":\s*true')
 Check "kill mid-wizard leaves no half-written config" $noHalf
@@ -335,13 +374,24 @@ foreach ($tid in $legacyTabs) {
 Check "legacy tab set matches v1.0.3 (5 presets)" $legacyOk
 Kill-App
 
-# ============ 清理：孤儿 webview + 恢复配置 ============
+# ============ 测试主体结束 ============
+}
+finally {
+Kill-App
+Show-Taskbar
+Stop-TestProcesses
+Show-Taskbar
+
+# 清理：孤儿 webview + 恢复配置。无论断言/交互在哪一步失败都必须执行。
 Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*focus-desktop-data*" } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
+Remove-Item $watchdogAlias -Force -ErrorAction SilentlyContinue
 if (Test-Path $backupCfg) { Copy-Item $backupCfg $cfg -Force } elseif (Test-Path $cfg) { Remove-Item $cfg -Force }
 if (Test-Path $backupFlag) { Copy-Item $backupFlag $setupFlag -Force } elseif (Test-Path $setupFlag) { Remove-Item $setupFlag -Force }
 Remove-Item $backupCfg, $backupFlag -ErrorAction SilentlyContinue
+Show-Taskbar
+}
 
 Log ("== RESULT: " + $script:pass + " pass / " + $script:fail + " fail ==")
 if ($script:fail -eq 0) { exit 0 } else { exit 1 }

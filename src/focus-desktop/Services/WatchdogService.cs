@@ -1,11 +1,13 @@
 using System.IO;
 using System.Diagnostics;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 
 namespace focus_desktop.Services;
 
 /// <summary>
 /// 看门狗（Umbra watchdog 模式的轻量移植）：
-/// Enter() 时启动伴生进程 focus-desktop.exe --watchdog &lt;pid&gt;，
+/// Enter() 时通过同一二进制的硬链接名启动 focus-desktop-watchdog.exe --watchdog &lt;pid&gt;，
 /// 它每 2 秒检查主进程存活 + 脏标志：
 ///   - 主进程死了且 focus_mode_active=true，立即恢复任务栏；确认恢复后清标志（覆盖 taskkill /f、
 ///     崩溃且异常处理器没跑成等一切"进程消失"场景），然后自行退出
@@ -16,7 +18,14 @@ namespace focus_desktop.Services;
 /// </summary>
 public static class WatchdogService
 {
+    public const string ProcessName = "focus-desktop-watchdog";
+
     private static Process? _watchdog;
+    private static readonly string WatchdogPath = Path.Combine(AppContext.BaseDirectory, $"{ProcessName}.exe");
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string newFileName, string existingFileName, IntPtr securityAttributes);
 
     public static void Launch()
     {
@@ -31,9 +40,10 @@ public static class WatchdogService
                 parentIdentity = $" {current.StartTime.ToUniversalTime().Ticks}";
             }
             catch { }
+            var watchdogExe = PrepareWatchdogExecutable(exe);
             var psi = new ProcessStartInfo
             {
-                FileName = exe,
+                FileName = watchdogExe,
                 Arguments = $"--watchdog {Environment.ProcessId}{parentIdentity}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -50,13 +60,50 @@ public static class WatchdogService
 
     public static void Stop()
     {
+        var watchdog = _watchdog;
+        _watchdog = null;
         try
         {
-            if (_watchdog != null && !_watchdog.HasExited)
-                _watchdog.Kill();
+            if (watchdog != null && !watchdog.HasExited)
+            {
+                watchdog.Kill();
+                watchdog.WaitForExit(2000);
+            }
         }
         catch { }
-        _watchdog = null;
+        finally { watchdog?.Dispose(); }
+
+        TryDeleteWatchdogLink();
+    }
+
+    /// <summary>
+    /// 同一 NTFS 文件使用独立镜像名启动：不复制大文件，也避免按名称结束主程序时误杀看门狗。
+    /// 硬链接不可用（只读目录/非 NTFS）时回退原路径，保留旧恢复能力。
+    /// </summary>
+    private static string PrepareWatchdogExecutable(string exe)
+    {
+        try
+        {
+            TryDeleteWatchdogLink();
+            if (CreateHardLink(WatchdogPath, exe, IntPtr.Zero))
+                return WatchdogPath;
+
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法创建独立看门狗硬链接");
+        }
+        catch (Exception ex)
+        {
+            CrashReporter.Write(ex, "watchdog-alias-failed");
+            return exe;
+        }
+    }
+
+    private static void TryDeleteWatchdogLink()
+    {
+        try
+        {
+            if (File.Exists(WatchdogPath)) File.Delete(WatchdogPath);
+        }
+        catch { }
     }
 
     /// <summary>--watchdog 参数的进程侧主循环。返回进程退出码。</summary>

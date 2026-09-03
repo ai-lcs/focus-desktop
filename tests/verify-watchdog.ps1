@@ -1,63 +1,93 @@
-﻿# verify-watchdog.ps1 — 看门狗核验：锁定中强杀主进程，任务栏必须在 5 秒内自动恢复
-# 覆盖此前覆盖不到的场景：taskkill /f（无异常处理机会、无 OnExit、脏标志残留 true）
+# verify-watchdog.ps1 - independent watchdog recovery test
 $ErrorActionPreference = "Continue"
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class TB {
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string cls, string title);
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr FindWindow(string cls, string title);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 }
 "@
 
 function Log($m) { Write-Output ("{0} {1}" -f (Get-Date -Format "HH:mm:ss.fff"), $m) }
 function TaskbarVisible { $h = [TB]::FindWindow("Shell_TrayWnd", $null); return ($h -ne [IntPtr]::Zero) -and [TB]::IsWindowVisible($h) }
+function Show-Taskbar { $h = [TB]::FindWindow("Shell_TrayWnd", $null); if ($h -ne [IntPtr]::Zero) { [void][TB]::ShowWindow($h, 5) } }
 
-$exe = "D:\focus-desktop\release\focus-desktop\focus-desktop.exe"
-$dataDir = "D:\focus-desktop\release\focus-desktop\focus-desktop-data"
+$repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$exe = Join-Path $repo "release\focus-desktop\focus-desktop.exe"
+$dataDir = Join-Path $repo "release\focus-desktop\focus-desktop-data"
+$watchdogExe = Join-Path (Split-Path $exe) "focus-desktop-watchdog.exe"
+$configFile = Join-Path $dataDir "config.json"
+$setupFlag = Join-Path $dataDir "setup_done.flag"
+$stateFile = Join-Path $dataDir "session_state.json"
+$backupDir = Join-Path $env:TEMP "focus-desktop-watchdog-test-backup"
+$hadConfig = Test-Path $configFile
+$hadSetup = Test-Path $setupFlag
+$hadState = Test-Path $stateFile
+$failed = $false
 
-# 前置：确保 setup 已完成（直接锁定模式）
-if (-not (Test-Path "$dataDir\setup_done.flag")) {
-    Set-Content -Path "$dataDir\setup_done.flag" -Value "verify" -Encoding UTF8
+function Stop-TestProcesses {
+    $testPaths = @([IO.Path]::GetFullPath($exe), [IO.Path]::GetFullPath($watchdogExe))
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and ($testPaths -contains [IO.Path]::GetFullPath($_.ExecutablePath)) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
-Log "=== 场景：锁定中 taskkill /f 主进程（watchdog 应在 ~4 秒内恢复任务栏） ==="
-Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 800
+New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+if ($hadConfig) { Copy-Item $configFile (Join-Path $backupDir "config.json") -Force }
+if ($hadSetup) { Copy-Item $setupFlag (Join-Path $backupDir "setup_done.flag") -Force }
+if ($hadState) { Copy-Item $stateFile (Join-Path $backupDir "session_state.json") -Force }
 
-$p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
-Start-Sleep -Seconds 6   # 等锁定完成（Enter: 脏标志+watchdog+任务栏隐藏+钩子）
+try {
+    Show-Taskbar
+    Stop-TestProcesses
+    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+    $studyFolderJson = $repo.Replace('\', '\\')
+    Set-Content -Path $configFile -Value "{`"studyFolder`":`"$studyFolderJson`",`"whitelist`":[`"chatgpt.com`"],`"loginDomains`":[],`"focusQuote`":`"verify`",`"exitPhrase`":`"verify`"}" -Encoding UTF8
+    Set-Content -Path $setupFlag -Value "verify" -Encoding UTF8
 
-$tbHidden = -not (TaskbarVisible)
-Log ("锁定后任务栏隐藏 = $tbHidden（应为 True）")
+    Log "=== kill main process; independent watchdog must restore taskbar ==="
+    $testStartedAt = Get-Date
+    $p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+    Start-Sleep -Seconds 6
 
-# watchdog 进程应在运行（同 exe 名，pid != 主进程）
-$wd = Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $p.Id }
-Log ("watchdog 进程存在 = " + [bool]$wd + "（应为 True）")
+    $tbHidden = -not (TaskbarVisible)
+    $wd = Get-Process "focus-desktop-watchdog" -ErrorAction SilentlyContinue | Select-Object -First 1
+    Log ("taskbar hidden = $tbHidden (expected True)")
+    Log ("independent watchdog exists = " + [bool]$wd + " (expected True)")
 
-# 强杀主进程（不走任何退出逻辑）
-taskkill /f /pid $p.Id | Out-Null
-Log "已 taskkill /f 主进程 pid=$($p.Id)，等待 watchdog 反应..."
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    Log "main process pid=$($p.Id) killed; waiting for watchdog..."
 
-$recovered = $false
-for ($i = 0; $i -lt 10; $i++) {
-    Start-Sleep -Milliseconds 1000
-    if (TaskbarVisible) { $recovered = $true; Log ("任务栏已恢复（第 $($i+1) 秒）"); break }
+    $recovered = $false
+    $flagClean = $false
+    $wdHit = $false
+    for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Milliseconds 1000
+        $recovered = TaskbarVisible
+        $flagAfter = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
+        $flagClean = $flagAfter -match '"focus_mode_active":\s*false'
+        $wdLog = Get-ChildItem (Join-Path $dataDir "logs\crash-*.log") -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $testStartedAt } |
+            Sort-Object LastWriteTime | Select-Object -Last 1
+        if ($wdLog) { $wdHit = (Get-Content $wdLog.FullName -Raw).Contains("watchdog-recovered") }
+        if ($recovered -and $flagClean -and $wdHit) { Log ("watchdog recovery completed after $($i+1)s"); break }
+    }
+
+    $aliasWasIndependent = $null -ne $wd -and $wd.ProcessName -eq "focus-desktop-watchdog"
+    $failed = -not ($tbHidden -and $aliasWasIndependent -and $recovered -and $flagClean -and $wdHit)
+    Log ("=== result: hidden=$tbHidden independent=$aliasWasIndependent recovered=$recovered flagClean=$flagClean watchdogLog=$wdHit ===")
+}
+finally {
+    Show-Taskbar
+    Stop-TestProcesses
+    Remove-Item $watchdogExe -Force -ErrorAction SilentlyContinue
+    if ($hadConfig) { Copy-Item (Join-Path $backupDir "config.json") $configFile -Force } else { Remove-Item $configFile -Force -ErrorAction SilentlyContinue }
+    if ($hadSetup) { Copy-Item (Join-Path $backupDir "setup_done.flag") $setupFlag -Force } else { Remove-Item $setupFlag -Force -ErrorAction SilentlyContinue }
+    if ($hadState) { Copy-Item (Join-Path $backupDir "session_state.json") $stateFile -Force } else { Remove-Item $stateFile -Force -ErrorAction SilentlyContinue }
+    Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue
+    Show-Taskbar
 }
 
-$flagAfter = Get-Content "$dataDir\session_state.json" -Raw
-Log ("恢复后脏标志 = $flagAfter（应为 false）")
-
-$wdLog = Get-ChildItem "$dataDir\logs\crash-*.log" | Sort-Object LastWriteTime | Select-Object -Last 1
-$wdHit = $false
-if ($wdLog) { $wdHit = (Get-Content $wdLog.FullName -Raw).Contains("watchdog-recovered") }
-Log ("watchdog-recovered 日志存在 = $wdHit（应为 True）")
-
-if (-not $recovered) { Log "FAIL 任务栏未恢复"; & $exe --restore | Out-Null }
-
-Log ("=== 结果: recovered=$recovered flagClean=$($flagAfter.Contains('false')) watchdogLog=$wdHit ===")
-
-# 清理残留 watchdog
-Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | Stop-Process -Force -ErrorAction SilentlyContinue
+if ($failed) { exit 1 }

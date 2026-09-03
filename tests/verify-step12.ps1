@@ -34,7 +34,10 @@ Write-Host "`n=== focus-desktop 停点① 自动验收 ===" -ForegroundColor Cya
 
 # ---------- 0. 前置清理 ----------
 Info "前置：清理残留实例"
+[Win32Probe]::TaskbarShow()
 Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process "focus-desktop-watchdog" -ErrorAction SilentlyContinue | Stop-Process -Force
+[Win32Probe]::TaskbarShow()
 Start-Sleep -Milliseconds 500
 # 预置 setup_done.flag（模拟已完成首次设置；否则应用进 Setup 模式不锁定）
 $setupFlag = Join-Path $DataDir "setup_done.flag"
@@ -90,17 +93,22 @@ Start-Sleep -Milliseconds 1500
 if (Get-LiveApp) { Pass "Alt+F4 被拦（进程存活）" }
 else { Fail "Alt+F4 拦截" "进程退出了" }
 
-# ---------- 7. 强杀 → 脏标志 ----------
-Info "强杀 focus-desktop……"
+# ---------- 7. 强杀主程序 → 独立 watchdog 自动恢复 ----------
+Info "强杀 focus-desktop 主程序，保留独立 watchdog……"
 Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 1000
 $stateFile = Join-Path $DataDir "session_state.json"
-$state = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
-if ($state -match '"focus_mode_active":\s*true') { Pass "强杀后脏标志残留 true（自愈依据）" }
-else { Fail "强杀脏标志" "state=$state" }
+$watchdogRecovered = $false
+$deadline = (Get-Date).AddSeconds(6)
+do {
+    Start-Sleep -Milliseconds 500
+    $state = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
+    $watchdogRecovered = (-not [Win32Probe]::TaskbarHidden()) -and ($state -match '"focus_mode_active":\s*false')
+} while (-not $watchdogRecovered -and (Get-Date) -lt $deadline)
+if ($watchdogRecovered) { Pass "独立 watchdog 恢复任务栏并清除脏标志" }
+else { Fail "独立 watchdog 恢复" "state=$state taskbarHidden=$([Win32Probe]::TaskbarHidden())" }
 
-# ---------- 8. 重启自愈 ----------
-Info "重启 focus-desktop 验证启动自愈……"
+# ---------- 8. watchdog 恢复后可再次启动并锁定 ----------
+Info "重启 focus-desktop 验证恢复后可再次锁定……"
 Start-Process $ExePath -WorkingDirectory (Split-Path $ExePath)
 $deadline = (Get-Date).AddSeconds(10)
 do {
@@ -108,15 +116,8 @@ do {
     $fw = [Win32Probe]::FindFocusWindow()
 } while ($fw -eq [IntPtr]::Zero -and (Get-Date) -lt $deadline)
 Start-Sleep -Milliseconds 2000
-$crashFiles = Get-ChildItem (Join-Path $DataDir "logs") -Filter "crash-*" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 2
-$healed = $false
-foreach ($cf in $crashFiles) {
-    if ((Get-Content $cf.FullName -Raw) -match "startup-self-heal") { $healed = $true }
-}
-if ($healed) { Pass "启动自愈触发（self-heal 日志存在）" }
-elseif ([Win32Probe]::TaskbarHidden()) { Pass "重启进入新一轮锁定（self-heal 日志缺失但锁定生效）" }
-else { Fail "重启自愈" "无 self-heal 日志且任务栏未隐藏" }
+if ([Win32Probe]::TaskbarHidden()) { Pass "watchdog 恢复后重启可再次进入锁定" }
+else { Fail "watchdog 恢复后重启" "任务栏未隐藏" }
 
 # ---------- 9. 干净退出（UIA 点击退出按钮）----------
 Info "UIA 点击退出按钮……"
@@ -210,7 +211,9 @@ else { Fail "--restore 脏标志" "state=$state" }
     # 兜底清理：无论脚本怎么死，恢复用户桌面
     Info "finally：清理测试现场（恢复任务栏 + 杀残留进程）"
     try {
+        [Win32Probe]::TaskbarShow()
         Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
+        Get-Process "focus-desktop-watchdog" -ErrorAction SilentlyContinue | Stop-Process -Force
         [Win32Probe]::TaskbarShow()
         if (Test-Path (Join-Path $DataDir "session_state.json")) {
             Set-Content -Path (Join-Path $DataDir "session_state.json") -Value '{"focus_mode_active": false}' -Encoding UTF8
