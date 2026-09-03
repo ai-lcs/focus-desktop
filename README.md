@@ -14,7 +14,7 @@
 Focus Desk 是一个**行为摩擦**工具，不是家长管控：
 
 - 启动即全屏盖住桌面、隐藏任务栏，拦截 Win / Alt+Tab / Alt+F4 等常见逃离路径；
-- 只有你勾选的网站能打开（B 站、ChatGPT、Gemini、DeepSeek，或你自己添加的网站）；
+- 只有你勾选的网站能打开（B 站、ChatGPT、AI Studio、DeepSeek、Notebook，或你自己添加的网站）；
 - 退出需要完整输入你预设的一句话——不是锁死，是让「无意识溜走」变得很麻烦；
 - **保留** Ctrl+Alt+Del 和任务管理器（系统级救生通道，故意不拦）。
 
@@ -22,8 +22,8 @@ Focus Desk 是一个**行为摩擦**工具，不是家长管控：
 
 | 方式 | 文件 | 适合 |
 |---|---|---|
-| **安装版（推荐）** | `FocusDesktop-Setup-1.0.0.exe`（约 48 MB） | 大多数人：正规安装/升级/卸载，开始菜单+桌面快捷方式 |
-| 便携版 | `focus-desktop-portable-1.0.0.zip`（约 62 MB） | 免安装：解压到任意文件夹，双击 `focus-desktop.exe` 即用 |
+| **安装版（推荐）** | `FocusDesktop-Setup-1.0.5.exe`（约 50 MB） | 大多数人：正规安装/升级/卸载，开始菜单+桌面快捷方式 |
+| 便携版 | `focus-desktop-portable-1.0.5.zip`（约 62 MB） | 免安装：解压到任意文件夹，双击 `focus-desktop.exe` 即用 |
 
 - 两种版本功能完全一致；免 .NET 安装（自包含）；
 - 安装版默认装到 Program Files（需要管理员权限，双击会弹 UAC），数据存放在 `%LOCALAPPDATA%\focus-desktop`；如需免管理员装到用户目录，命令行加 `/CURRENTUSER` 参数；
@@ -37,16 +37,15 @@ Focus Desk 是一个**行为摩擦**工具，不是家长管控：
 > 2. 点出现的「**仍要运行**」。
 >
 > 之后安装、升级、日常启动都不会再弹。软件安全性可以自行验证：全部源码公开、无服务器、无遥测（见下方 FAQ）。
-> 也可以用 PowerShell 校验文件哈希与 Release 页公布的一致：`Get-FileHash .\FocusDesktop-Setup-1.0.0.exe`
+> 也可以用 PowerShell 校验文件哈希与 Release 页公布的一致：`Get-FileHash .\FocusDesktop-Setup-1.0.5.exe`
 
 ## 首次配置（一次性的图形向导）
 
-第一次启动会进入 4 步向导，全程点选，不需要懂任何配置文件：
+第一次启动会进入 3 步向导，全程点选，不需要懂任何配置文件：
 
 1. **学习文件夹** —— 你的资料放哪（PDF/图片/笔记）；默认 `文档\focus`；
-2. **网站** —— 勾选预设站点（哔哩哔哩/ChatGPT/AI Studio/DeepSeek），或添加自定义网站（输入网址即可）；只勾选的网站才会出现；
+2. **网站** —— 勾选预设站点（哔哩哔哩/ChatGPT/AI Studio/DeepSeek/Notebook），或添加自定义网站（输入网址即可）；只勾选的网站才会出现；
 3. **专注设置** —— 首页那句「你想成为怎样的人？」、退出时要输入的句子、番茄钟参数；
-4. **背景图**（可选）—— 选一张图，自动居中裁切铺满首页并调暗，不影响文字可读性。
 
 每一步都可以「预览首页」看效果再回来改。点「完成并开始使用」后配置即冻结：**日常界面里没有设置入口**——环境稳定不折腾。想重新配置 = 卸载重装（配置在卸载时清除）。
 
@@ -105,8 +104,8 @@ C# / .NET 10 · WPF + WebView2（WindowsFormsHost 混合承载）· 单工程 ·
 
 ```text
 App.xaml.cs             启动分流：--preview/--smoke/--restore/--watchdog/--urltest/--voltest；首次运行进配置向导
-MainWindow              Tab 条 + 首页（时钟/专注语/快捷入口/背景图）+ 文件页 + Web 宿主
-SetupWizard             4 步首配向导：内存草稿 → 原子提交（中途退出零残留）
+MainWindow              Tab 条 + 首页（时钟/专注语/快捷入口）+ 文件页 + Web 宿主
+SetupWizard             3 步首配向导：内存草稿 → 原子提交（中途退出零残留）
 Services/
   SiteCatalog           站点数据驱动核心：preset/custom 解析、白名单/登录域重算（纯函数，可单测）
   WebTabService         Tab 生命周期/单 Environment 共享登录态/崩溃自愈
@@ -130,9 +129,9 @@ powershell -ExecutionPolicy Bypass -File installer/build-release.ps1
 | 脚本 | 覆盖 |
 |---|---|
 | `tests/verify-step12.ps1` | 锁定层 13 项（钩子/任务栏/强杀自愈/干净退出/`--restore`），跑时真实锁桌面约 40s |
-| `tests/verify-setup.ps1` | 首配向导 32 项（向导全流程/原子提交/中途强杀幂等/legacy 不弹向导） |
+| `tests/verify-setup.ps1` | 首配向导 35 项（向导全流程/原子提交/中途强杀幂等/legacy 不弹向导） |
 | `tests/verify-install.ps1` | 安装包 16 项（静默装/首跑落盘/升级保数据/卸载清数据/学习目录不碰） |
-| `--urltest` 参数 | 白名单/站点解析 53 项 |
+| `--urltest` 参数 | 白名单/站点解析 57 项 |
 | `--smoke` 参数 | WebView2 环境 + 全 Tab 创建冒烟 |
 
 ## 关键设计决策（踩坑实录）

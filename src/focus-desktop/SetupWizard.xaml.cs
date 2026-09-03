@@ -15,7 +15,7 @@ using ColorConverter = System.Windows.Media.ColorConverter;
 namespace focus_desktop;
 
 /// <summary>
-/// Public v1 首次安装配置向导（4 步 + 底部导航）。
+/// Public v1 首次安装配置向导（3 步 + 底部导航）。
 /// 独立全屏 Window，由 App 在启动时盖在 MainWindow 之上（不进锁定）。
 /// 全程 GUI：草稿在内存，只有「完成并开始使用」才原子写 config.json + setup_done.flag；
 /// 中途关闭应用不写任何配置，下次启动幂等重进向导。
@@ -67,7 +67,7 @@ public partial class SetupWizard : Window
         PomoCyclesBox.Text = (_draft.PomodoroCyclesUntilLong ?? 4).ToString();
     }
 
-    /// <summary>按 SiteCatalog 目录生成 4 张 preset 卡片；legacy 配置按旧白名单推导勾选。</summary>
+    /// <summary>按 SiteCatalog 目录生成 preset 卡片；legacy 配置按旧白名单推导勾选。</summary>
     private void BuildPresetCards()
     {
         var legacy = _draft.IsLegacyConfig();

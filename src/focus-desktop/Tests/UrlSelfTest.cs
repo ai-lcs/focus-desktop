@@ -47,6 +47,8 @@ public static class UrlSelfTest
         Check("https://accounts.google.com/o/oauth2/auth?x=1", true);      // OAuth 登录
         Check("https://passport.bilibili.com/login", true);                // B站扫码登录
         Check("https://auth.openai.com/authorize", true);                  // ChatGPT 登录
+        Check("https://notebook.google.com/", true);                       // Notebook 新入口
+        Check("https://notebooklm.google.com/", true);                    // Notebook 旧入口兼容
 
         Console.WriteLine("== 非白名单应拦截 ==");
         Check("https://www.baidu.com/s?wd=1", false);                      // 搜索引擎
@@ -61,6 +63,17 @@ public static class UrlSelfTest
         Check("file:///C:/Windows/system32/config", false);                // 本地文件协议
         Check("javascript:alert(1)", false);                               // JS 协议
         Check("https://taobao.com", false);                                // 购物
+
+        // v1.0.5：已配置用户的 sites[] 也必须从 preset 目录获得新域名，不能只依赖旧 config 白名单。
+        var notebookCfg = new AppSettings
+        {
+            Sites = new List<SiteCatalog.SiteEntry> { new() { Id = "notebooklm" } }
+        };
+        SiteCatalog.ComputeEffectiveDomains(notebookCfg, out var notebookWl, out var notebookLd);
+        notebookCfg.Whitelist = notebookWl;
+        notebookCfg.LoginDomains = notebookLd;
+        CheckCfg("https://notebook.google.com/", true, notebookCfg);
+        CheckCfg("https://notebooklm.google.com/", true, notebookCfg);
 
         // ==================== T3：SiteCatalog 数据驱动站点自测（均 new AppSettings() 现场构造） ====================
 

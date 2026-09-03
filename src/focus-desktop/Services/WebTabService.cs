@@ -94,6 +94,12 @@ public sealed class WebTabService : IDisposable
             await view.EnsureCoreWebView2Async(_env);
 
             var cfg = AppSettings.LoadOrDefault();
+            // 站点 preset 的域名真相在 SiteCatalog。这里不能只信 config 中旧的
+            // whitelist，否则升级后新增/迁移的域名（如 notebook.google.com）
+            // 会在真正的 WebView 导航策略层仍被拦截。
+            SiteCatalog.ComputeEffectiveDomains(cfg, out var effectiveWhitelist, out var effectiveLoginDomains);
+            cfg.Whitelist = effectiveWhitelist;
+            cfg.LoginDomains = effectiveLoginDomains;
             WirePolicy(view, cfg);
             WireTitleSync(id, info.Title, view);
             WireProcessFailed(view);

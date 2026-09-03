@@ -533,7 +533,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 从配置解析站点集（唯一入口，构造函数调用一次）：
-    /// - 站点列表 = SiteCatalog.ResolveSites（legacy 配置自动展开为 4 preset）；
+    /// - 站点列表 = SiteCatalog.ResolveSites（legacy 配置自动展开为默认 preset）；
     /// - 有效白名单/登录域由 SiteCatalog 重算后写回 cfg（本次运行生效，不落盘）；
     /// - 图标：preset 取默认表，custom 默认 🌐（config 未来加 emoji 字段时读 cfg，暂不入 schema）。
     /// </summary>

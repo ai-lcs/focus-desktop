@@ -23,7 +23,7 @@ public static class CrashReporter
                 .AppendLine("focus-desktop crash report")
                 .AppendLine($"Time: {timestamp:O}")
                 .AppendLine($"Source: {source}")
-                .AppendLine($"Version: {appVersion ?? "0.1.0"}")
+                .AppendLine($"Version: {appVersion ?? typeof(CrashReporter).Assembly.GetName().Version?.ToString(3) ?? "unknown"}")
                 .AppendLine($"Process: {Environment.ProcessId}")
                 .AppendLine($"OS: {Environment.OSVersion}")
                 .AppendLine($"Runtime: {Environment.Version}")

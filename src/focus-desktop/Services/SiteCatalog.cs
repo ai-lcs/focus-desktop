@@ -5,7 +5,7 @@ namespace focus_desktop.Services;
 /// - Preset 站点：真相在代码（BuiltInSites），config 只存 id（升级 app 可修域名）；
 /// - Custom 站点：用户首次向导添加，config 自含全部字段；
 /// - Resolve()：config → 运行时三件套（Tab 列表、Whitelist、LoginDomains）的纯函数，可单测；
-/// - Legacy：v0.5.x 老配置（无 schemaVersion 但有 whitelist）→ 4 个 preset + 原样保留旧域名列表；
+/// - Legacy：v0.5.x 老配置（无 schemaVersion 但有 whitelist）→ 默认 preset + 原样保留旧域名列表；
 /// - ParseCustomInput：自定义站点的输入归一化（host 提取、www 去除、域推导、查重），
 ///   校验失败返回 null——调用方（向导）只提示「网址无效或与已有站点重复」，不暴露工程概念。
 /// </summary>
@@ -48,8 +48,10 @@ public static class SiteCatalog
                 new[] { "deepseek.com" }, Array.Empty<string>(), true, true),
             // v1.0.3：NotebookLM 升为第 5 preset（用户 2026-09-03 指示，社区反馈）。
             // v1.0.4：Title=Notebook（tab 定宽 60px 下 NotebookLM 截断成 notebookl，用户指示缩短）。
-            ["notebooklm"] = new("notebooklm", "notebooklm", "Notebook", "https://notebooklm.google.com",
-                new[] { "notebooklm.google.com" }, new[] { "accounts.google.com" }, true, true),
+            // v1.0.5：Google 将实际入口迁移到 notebook.google.com；保留旧域名兼容历史链接。
+            ["notebooklm"] = new("notebooklm", "notebooklm", "Notebook", "https://notebook.google.com",
+                new[] { "notebook.google.com", "notebooklm.google.com" },
+                new[] { "accounts.google.com" }, true, true),
         };
 
     /// <summary>默认站点集（Setup 向导初始勾选 / legacy 配置的运行时展开）。

@@ -26,6 +26,8 @@ public class AppSettings
         "aistudio.google.com",
         "deepseek.com",
         "bilibili.com",
+        "notebook.google.com",
+        "notebooklm.google.com",
     };
 
     /// <summary>登录过程放行域（OAuth/扫码）。实测后增删。</summary>
