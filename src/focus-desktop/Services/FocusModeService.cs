@@ -17,19 +17,27 @@ public sealed class FocusModeService
     public void Enter()
     {
         if (IsActive) return;
+        try
+        {
+            RecoveryService.MarkActive(); // 1. 先立牌：从这一刻起崩了下次要自愈
 
-        RecoveryService.MarkActive(); // 1. 先立牌：从这一刻起崩了下次要自愈
+            WatchdogService.Launch();     // 2. 看门狗伴生进程（taskkill /f 等进程突然消失时兜底恢复）
 
-        WatchdogService.Launch();     // 2. 看门狗伴生进程（taskkill /f 等进程突然消失时兜底恢复）
+            TaskbarService.Hide();        // 3. 藏任务栏
 
-        TaskbarService.Hide();        // 3. 藏任务栏
+            _keyboard.Install();          // 4. 挂键盘钩子（最后挂：钩子要在 UI 线程消息循环里活着）
 
-        _keyboard.Install();          // 4. 挂键盘钩子（最后挂：钩子要在 UI 线程消息循环里活着）
-
-        IsActive = true;
+            IsActive = true;
+        }
+        catch
+        {
+            // 任一步失败都在把异常交给上层前完成回滚，避免依赖外部异常处理器。
+            Recover();
+            throw;
+        }
     }
 
-    /// <summary>正常退出：钩子 → 任务栏 → 杀看门狗 → 清标志。完全倒序。</summary>
+    /// <summary>正常退出：钩子 → 任务栏 → 杀看门狗 → 确认恢复后清标志。完全倒序。</summary>
     public void Exit()
     {
         if (!IsActive) return;
@@ -41,7 +49,7 @@ public sealed class FocusModeService
 
         WatchdogService.Stop();       // 3. 杀看门狗（恢复已完成，它无事可做）
 
-        RecoveryService.MarkClean();  // 4. 最后清牌
+        if (shown) RecoveryService.MarkClean(); // 4. 只有确认任务栏恢复后才清牌，保留下次启动自愈机会
 
         if (!shown)
         {
@@ -55,9 +63,13 @@ public sealed class FocusModeService
     public void Recover()
     {
         try { _keyboard.Uninstall(); } catch { }
-        try { TaskbarService.Show(); } catch { }
+        var shown = false;
+        try { shown = TaskbarService.Show(); } catch { }
         try { WatchdogService.Stop(); } catch { }
-        try { RecoveryService.MarkClean(); } catch { }
+        if (shown)
+        {
+            try { RecoveryService.MarkClean(); } catch { }
+        }
         IsActive = false;
     }
 

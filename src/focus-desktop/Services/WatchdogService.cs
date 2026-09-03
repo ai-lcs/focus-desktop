@@ -7,7 +7,7 @@ namespace focus_desktop.Services;
 /// 看门狗（Umbra watchdog 模式的轻量移植）：
 /// Enter() 时启动伴生进程 focus-desktop.exe --watchdog &lt;pid&gt;，
 /// 它每 2 秒检查主进程存活 + 脏标志：
-///   - 主进程死了且 focus_mode_active=true，立即恢复任务栏 + 清标志（覆盖 taskkill /f、
+///   - 主进程死了且 focus_mode_active=true，立即恢复任务栏；确认恢复后清标志（覆盖 taskkill /f、
 ///     崩溃且异常处理器没跑成等一切"进程消失"场景），然后自行退出
 ///   - 脏标志=false（正常退出已恢复），自行退出
 /// 主进程 Exit()/Recover() 时主动杀掉 watchdog。
@@ -24,10 +24,17 @@ public static class WatchdogService
         {
             var exe = Environment.ProcessPath;
             if (string.IsNullOrEmpty(exe)) return;
+            var parentIdentity = "";
+            try
+            {
+                using var current = Process.GetCurrentProcess();
+                parentIdentity = $" {current.StartTime.ToUniversalTime().Ticks}";
+            }
+            catch { }
             var psi = new ProcessStartInfo
             {
                 FileName = exe,
-                Arguments = $"--watchdog {Environment.ProcessId}",
+                Arguments = $"--watchdog {Environment.ProcessId}{parentIdentity}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = AppContext.BaseDirectory,
@@ -53,7 +60,7 @@ public static class WatchdogService
     }
 
     /// <summary>--watchdog 参数的进程侧主循环。返回进程退出码。</summary>
-    public static int RunLoop(int parentPid)
+    public static int RunLoop(int parentPid, long? expectedStartTicks = null)
     {
         try
         {
@@ -62,8 +69,24 @@ public static class WatchdogService
                 Thread.Sleep(2000);
                 // GetProcessById 在进程不存在时抛 ArgumentException——用 try 判存活
                 bool parentAlive;
-                try { parentAlive = Process.GetProcessById(parentPid) != null; }
+                try
+                {
+                    using var parent = Process.GetProcessById(parentPid);
+                    parentAlive = !parent.HasExited;
+                    if (parentAlive && expectedStartTicks.HasValue)
+                    {
+                        try
+                        {
+                            parentAlive = parent.StartTime.ToUniversalTime().Ticks == expectedStartTicks.Value;
+                        }
+                        catch
+                        {
+                            // 无法核对身份时宁可继续等待，避免误把新进程当成旧宿主。
+                        }
+                    }
+                }
                 catch (ArgumentException) { parentAlive = false; }
+                catch (InvalidOperationException) { parentAlive = false; }
                 var flag = RecoveryService.WasActiveLastTime();
 
                 if (!parentAlive)
@@ -71,13 +94,19 @@ public static class WatchdogService
                     // 主进程消失：脏标志还在，我们是最后一个能恢复系统的
                     if (flag)
                     {
-                        try { TaskbarService.Show(); } catch { }
-                        try { RecoveryService.MarkClean(); } catch { }
+                        var restored = false;
+                        try { restored = TaskbarService.Show(); } catch { }
+                        if (restored)
+                        {
+                            try { RecoveryService.MarkClean(); } catch { }
+                        }
                         try
                         {
                             CrashReporter.Write(
                                 new InvalidOperationException(
-                                    $"主进程(pid={parentPid})非正常退出，watchdog 已恢复任务栏并清除脏标志"),
+                                    restored
+                                        ? $"主进程(pid={parentPid})非正常退出，watchdog 已恢复任务栏并清除脏标志"
+                                        : $"主进程(pid={parentPid})非正常退出，watchdog 未确认任务栏恢复，保留脏标志"),
                                 "watchdog-recovered");
                         }
                         catch { }

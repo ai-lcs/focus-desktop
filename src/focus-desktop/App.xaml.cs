@@ -21,10 +21,13 @@ public partial class App : Application
         _options = AppOptions.Parse(e.Args);
         WireGlobalExceptionHandlers();
 
-        // --watchdog <pid>：看门狗伴生进程模式（无 UI，Run到主进程消失）
+        // --watchdog <pid> [startTicks]：看门狗伴生进程模式（无 UI，Run到主进程消失）
         if (e.Args.Length >= 2 && e.Args[0] == "--watchdog" && int.TryParse(e.Args[1], out var parentPid))
         {
-            Environment.Exit(WatchdogService.RunLoop(parentPid));
+            long? parentStartTicks = null;
+            if (e.Args.Length >= 3 && long.TryParse(e.Args[2], out var parsedStartTicks))
+                parentStartTicks = parsedStartTicks;
+            Environment.Exit(WatchdogService.RunLoop(parentPid, parentStartTicks));
             return;
         }
 
@@ -58,8 +61,8 @@ public partial class App : Application
         // --restore：纯恢复模式。不进 UI，恢复完就退。
         if (_options.Restore)
         {
-            TaskbarService.Show();
-            RecoveryService.MarkClean();
+            var restored = TaskbarService.Show();
+            if (restored) RecoveryService.MarkClean();
             MessageBox.Show("已尝试恢复 Windows 状态（任务栏显示 / 钩子清理）。", "focus-desktop 恢复",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();

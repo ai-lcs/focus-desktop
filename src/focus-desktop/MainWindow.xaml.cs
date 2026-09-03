@@ -690,10 +690,22 @@ public partial class MainWindow : Window
             id = $"{baseId}-{++n}";
         }
         var tabTitle = n == 1 ? title : $"{title} {n}";
-        _web.RegisterTab(id, tabTitle, url);
-        AddWebTabButton(id, tabTitle);
-        await _web.EnsureTabAsync(id, _hostPanel);
-        ActivateTab(id);
+        var fallback = _activeTab;
+        var registered = false;
+        try
+        {
+            _web.RegisterTab(id, tabTitle, url);
+            registered = true;
+            AddWebTabButton(id, tabTitle);
+            await _web.EnsureTabAsync(id, _hostPanel);
+            ActivateTab(id);
+        }
+        catch (Exception ex)
+        {
+            if (registered) RemoveFailedTab(id, fallback);
+            ShowBlocked($"网页组件启动失败：{ex.Message}");
+            CrashReporter.Write(ex, $"new-tab-{id}");
+        }
     }
 
     /// <summary>注册新 Tab 并立即显示在 Tab 条（PDF 多开用）。</summary>
@@ -735,7 +747,11 @@ public partial class MainWindow : Window
         if (id is "home" or "files") return; // 固定页不可关
         var order = TabOrder();
         var pos = order.IndexOf(id);
-        _web?.CloseTab(id);
+        if (_web != null && !_web.CloseTab(id))
+        {
+            ShowBlocked("标签页正在加载，请稍后再关闭");
+            return;
+        }
         if (_tabButtons.Remove(id, out var btn) && btn.Parent is System.Windows.Controls.Panel parent)
             parent.Children.Remove(btn);
         RefreshAddTabButton(); // 关 tab 后「+」仍在末位
@@ -743,6 +759,21 @@ public partial class MainWindow : Window
                  : pos > 0 ? order[pos - 1] : "home";
         if (_activeTab == id) ActivateTab(next);
         else RefreshTabVisuals();
+    }
+
+    private void RemoveFailedTab(string id, string fallback)
+    {
+        _web?.CloseTab(id);
+        if (_tabButtons.Remove(id, out var btn) && btn.Parent is System.Windows.Controls.Panel parent)
+            parent.Children.Remove(btn);
+        RefreshAddTabButton();
+
+        var target = _activeTab == id || !_tabButtons.ContainsKey(_activeTab) ? fallback : _activeTab;
+        if (!_tabButtons.ContainsKey(target)) target = "home";
+        _activeTab = target;
+        ApplyTabVisibility(target);
+        _web?.Activate(target);
+        RefreshTabVisuals();
     }
 
     private void RefreshTabVisuals()
@@ -967,9 +998,11 @@ public partial class MainWindow : Window
                 var fileList = fEnum.OrderBy(f => Path.GetFileName(f)).Take(cap + 1).ToList();
                 var truncated = dirList.Count + fileList.Count > cap;
 
-                foreach (var d in dirList.Take(cap))
+                var dirTake = Math.Min(dirList.Count, cap);
+                foreach (var d in dirList.Take(dirTake))
                     rows.Add(("📁", Path.GetFileName(d), d, true));
-                foreach (var f in fileList.Take(cap))
+                var fileTake = Math.Min(fileList.Count, cap - dirTake);
+                foreach (var f in fileList.Take(fileTake))
                 {
                     var ext = Path.GetExtension(f).ToLowerInvariant();
                     var icon = ext switch
@@ -1049,32 +1082,58 @@ public partial class MainWindow : Window
             ShowBlocked("请先完成首次配置");
             return;
         }
-        var ext = Path.GetExtension(path).ToLowerInvariant();
-        if (ext == ".pdf" || ext is ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" || ext is ".txt" or ".md")
+        try
         {
-            if (_web == null || _hostPanel == null) { ShowBlocked("网页组件未就绪"); return; }
+            if (!UrlFilter.IsPathUnderDirectory(path, _filesRoot))
+            {
+                ShowBlocked("文件不在学习目录内");
+                return;
+            }
 
-            // 同文件复用已开 Tab；否则新开（多开）
-            var uri = new Uri(path).AbsoluteUri;
-            var existing = _web.Tabs.FirstOrDefault(t =>
-                t.Id.StartsWith("pdf-") && t.InitialUrl == uri);
-            if (existing != null) { ActivateTab(existing.Id); return; }
+            var ext = Path.GetExtension(path).ToLowerInvariant();
+            if (ext == ".pdf" || ext is ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" || ext is ".txt" or ".md")
+            {
+                if (_web == null || _hostPanel == null) { ShowBlocked("网页组件未就绪"); return; }
 
-            var id = $"pdf-{++_pdfCount}";
-            var name = Path.GetFileNameWithoutExtension(path);
-            _web.RegisterTab(id, name, uri);
-            AddWebTabButton(id, name);
-            // 关键：先把 WebHost 展开再创建——文件页态下 WebHost 是 Collapsed，
-            // 折叠期创建的 WebView 会永久坏死（v0.4.1 像素实锤，skill 有档案）。
-            // 全员常显架构下展开瞬间露的是 WinForms 面板底色（已压成深灰），
-            // 不是旧内容，随后 Activate 提到最前，无视觉突变。
-            WebHost.Visibility = Visibility.Visible;
-            await _web.EnsureTabAsync(id, _hostPanel);
-            ActivateTab(id);
+                // 同文件复用已开 Tab；否则新开（多开）
+                var uri = new Uri(path).AbsoluteUri;
+                var existing = _web.Tabs.FirstOrDefault(t =>
+                    t.Id.StartsWith("pdf-") && t.InitialUrl == uri);
+                if (existing != null) { ActivateTab(existing.Id); return; }
+
+                var id = $"pdf-{++_pdfCount}";
+                var name = Path.GetFileNameWithoutExtension(path);
+                var fallback = _activeTab;
+                var registered = false;
+                try
+                {
+                    _web.RegisterTab(id, name, uri);
+                    registered = true;
+                    AddWebTabButton(id, name);
+                    // 关键：先把 WebHost 展开再创建——文件页态下 WebHost 是 Collapsed，
+                    // 折叠期创建的 WebView 会永久坏死（v0.4.1 像素实锤，skill 有档案）。
+                    // 全员常显架构下展开瞬间露的是 WinForms 面板底色（已压成深灰），
+                    // 不是旧内容，随后 Activate 提到最前，无视觉突变。
+                    WebHost.Visibility = Visibility.Visible;
+                    await _web.EnsureTabAsync(id, _hostPanel);
+                    ActivateTab(id);
+                }
+                catch (Exception ex)
+                {
+                    if (registered) RemoveFailedTab(id, fallback);
+                    ShowBlocked($"文件预览启动失败：{ex.Message}");
+                    CrashReporter.Write(ex, $"file-tab-{id}");
+                }
+            }
+            else
+            {
+                ShowBlocked($"V1 内置支持 PDF/图片/TXT，暂不支持 {ext}。请先转 PDF 放入学习目录。");
+            }
         }
-        else
+        catch (Exception ex)
         {
-            ShowBlocked($"V1 内置支持 PDF/图片/TXT，暂不支持 {ext}。请先转 PDF 放入学习目录。");
+            ShowBlocked($"文件预览失败：{ex.Message}");
+            CrashReporter.Write(ex, "open-file");
         }
     }
 

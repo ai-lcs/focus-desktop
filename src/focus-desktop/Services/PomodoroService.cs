@@ -49,10 +49,10 @@ public sealed class PomodoroService
 
     public void LoadConfig(AppSettings cfg)
     {
-        if (cfg.PomodoroWorkMinutes is int w and > 0) WorkMinutes = w;
-        if (cfg.PomodoroShortBreakMinutes is int s and > 0) ShortBreakMinutes = s;
-        if (cfg.PomodoroLongBreakMinutes is int l and > 0) LongBreakMinutes = l;
-        if (cfg.PomodoroCyclesUntilLong is int c and > 0) CyclesUntilLong = c;
+        if (cfg.PomodoroWorkMinutes is int w and > 0 and <= 180) WorkMinutes = w;
+        if (cfg.PomodoroShortBreakMinutes is int s and > 0 and <= 60) ShortBreakMinutes = s;
+        if (cfg.PomodoroLongBreakMinutes is int l and > 0 and <= 120) LongBreakMinutes = l;
+        if (cfg.PomodoroCyclesUntilLong is int c and > 0 and <= 12) CyclesUntilLong = c;
     }
 
     // ---- 控制 ----

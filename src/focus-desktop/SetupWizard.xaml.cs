@@ -286,14 +286,16 @@ public partial class SetupWizard : Window
         // 内/相等——卸载会 DelTree 整个数据目录，「绝不碰学习文件」的承诺会因此失效（v1.0.2 审计）。
         try
         {
-            var dataDir = System.IO.Path.GetFullPath(Paths.DataDir)
-                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
-            var full = System.IO.Path.GetFullPath(folder)
-                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
-            if (full.Equals(dataDir, StringComparison.OrdinalIgnoreCase)
-                || full.StartsWith(dataDir + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            var dataDir = System.IO.Path.GetFullPath(Paths.DataDir);
+            var appDir = System.IO.Path.GetFullPath(AppContext.BaseDirectory);
+            if (UrlFilter.IsPathUnderDirectory(folder, dataDir))
             {
                 ShowError(FolderError, "学习文件夹不能放在应用数据目录内（卸载时会连同清除）。请换一个位置。");
+                return false;
+            }
+            if (UrlFilter.IsPathUnderDirectory(folder, appDir))
+            {
+                ShowError(FolderError, "学习文件夹不能放在应用安装目录内。请换一个位置。");
                 return false;
             }
         }

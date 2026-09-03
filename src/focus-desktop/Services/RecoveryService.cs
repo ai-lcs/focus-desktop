@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 namespace focus_desktop.Services;
 
 /// <summary>
@@ -27,13 +28,24 @@ public static class RecoveryService
     {
         try
         {
-            if (!File.Exists(Paths.SessionStateFile)) return false;
-            var text = File.ReadAllText(Paths.SessionStateFile);
-            return text.Contains("true", StringComparison.OrdinalIgnoreCase);
+            using var stream = new FileStream(Paths.SessionStateFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var document = JsonDocument.Parse(stream);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("focus_mode_active", out var active)
+                && active.ValueKind == JsonValueKind.True;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
         }
         catch
         {
-            return false; // 读不了就当没有——恢复动作本身是幂等的，多恢复一次无害
+            // 状态损坏/不可读时保守恢复；Show/MarkClean 都是幂等操作。
+            return true;
         }
     }
 }

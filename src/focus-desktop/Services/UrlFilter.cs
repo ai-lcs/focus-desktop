@@ -1,4 +1,7 @@
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 
 namespace focus_desktop.Services;
 
@@ -31,16 +34,21 @@ public static class UrlFilter
     /// <summary>file:// 路径是否在学习目录子树内（防任意本地文件浏览）。</summary>
     private static bool IsUnderStudyFolder(Uri fileUri, string studyFolder)
     {
+        return IsPathUnderDirectory(fileUri.LocalPath, studyFolder);
+    }
+
+    /// <summary>判断路径是否位于目录内，并优先按 Windows 实际目标路径校验 junction/symlink。</summary>
+    public static bool IsPathUnderDirectory(string path, string root)
+    {
         try
         {
-            if (string.IsNullOrWhiteSpace(studyFolder)) return false;
-            var path = fileUri.LocalPath; // 已解码的本地路径
-            var root = System.IO.Path.GetFullPath(studyFolder)
-                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
-            var full = System.IO.Path.GetFullPath(path)
-                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
-            return string.Equals(full, root, StringComparison.OrdinalIgnoreCase)
-                || full.StartsWith(root + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root)) return false;
+            var rootFull = CanonicalPath(root) ?? System.IO.Path.GetFullPath(root);
+            var pathFull = CanonicalPath(path) ?? System.IO.Path.GetFullPath(path);
+            rootFull = NormalizeForComparison(rootFull);
+            pathFull = NormalizeForComparison(pathFull);
+            return string.Equals(pathFull, rootFull, StringComparison.OrdinalIgnoreCase)
+                || pathFull.StartsWith(rootFull + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -48,6 +56,52 @@ public static class UrlFilter
         }
     }
 
+    private static string? CanonicalPath(string path)
+    {
+        try
+        {
+            using var handle = CreateFile(path, 0, 0x00000007, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+            if (handle.IsInvalid) return null;
+
+            for (var capacity = 260; capacity <= 32768; capacity *= 2)
+            {
+                var buffer = new StringBuilder(capacity);
+                var length = GetFinalPathNameByHandle(handle, buffer, (uint)capacity, 0);
+                if (length == 0) return null;
+                if (length < capacity - 1) return buffer.ToString();
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            return @"\\" + path[8..];
+        if (path.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+            return path[4..];
+        return path;
+    }
+
+    private static string NormalizeForComparison(string path)
+    {
+        path = NormalizePath(path);
+        var root = System.IO.Path.GetPathRoot(path);
+        if (root != null && string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+            return root;
+        return path.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+    }
+
     /// <summary>供 UI 显示被拦截的 URL（顶栏提示条）。</summary>
     public static string? BlockedMessage(Uri uri) => $"已拦截非白名单页面：{uri.Host}";
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string fileName, uint desiredAccess, uint shareMode, IntPtr securityAttributes,
+        uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(
+        SafeFileHandle file, StringBuilder path, uint pathLength, uint flags);
 }

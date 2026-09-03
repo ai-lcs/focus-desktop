@@ -25,6 +25,8 @@ public sealed class WebTabService : IDisposable
     /// <summary>懒加载注册（不建控件）；返回可立即显示的 Tab。</summary>
     public TabInfo RegisterTab(string id, string title, string initialUrl)
     {
+        if (_tabs.Any(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"tab {id} 已存在");
         var info = new TabInfo(id, title, initialUrl, null);
         _tabs.Add(info);
         return info;
@@ -68,7 +70,8 @@ public sealed class WebTabService : IDisposable
         {
             // 另一个创建正在进行（预热中用户点了）：等它完成
             while (_creating.Contains(id)) await Task.Delay(100);
-            return _tabs.First(t => t.Id == id);
+            return _tabs.FirstOrDefault(t => t.Id == id)
+                ?? throw new InvalidOperationException($"tab {id} 已关闭");
         }
         _creating.Add(id);
         try
@@ -92,6 +95,15 @@ public sealed class WebTabService : IDisposable
             };
             host.Controls.Add(view);
             await view.EnsureCoreWebView2Async(_env);
+
+            // 创建期间允许用户关闭 Tab；不要把已关闭的控件重新写回列表。
+            idx = _tabs.FindIndex(t => t.Id == id);
+            if (idx < 0)
+            {
+                view.Dispose();
+                throw new InvalidOperationException($"tab {id} 已关闭");
+            }
+            info = _tabs[idx];
 
             var cfg = AppSettings.LoadOrDefault();
             // 站点 preset 的域名真相在 SiteCatalog。这里不能只信 config 中旧的
@@ -149,6 +161,7 @@ public sealed class WebTabService : IDisposable
 
     public bool CloseTab(string id)
     {
+        if (_creating.Contains(id)) return false;
         var idx = _tabs.FindIndex(t => t.Id == id);
         if (idx < 0) return false;
         var info = _tabs[idx];

@@ -98,10 +98,14 @@ public static class SiteCatalog
             }
             // custom：必须自含 title/url/domains，且 URL 合法
             if (string.IsNullOrWhiteSpace(e.Title) || string.IsNullOrWhiteSpace(e.Url)) continue;
-            if (!TryParseHttpUrl(e.Url, out _, out _)) continue;
+            if (!TryParseHttpUrl(e.Url, out _, out var urlHost) || urlHost == null) continue;
             var domains = (e.Domains ?? new List<string>())
                 .Select(NormalizeDomain).Where(d => d.Length > 0).Distinct().ToArray();
-            if (domains.Length == 0) continue;
+            // 配置文件可被手工编辑：custom 白名单只能是 URL 主机或其子域，
+            // 不能借 domains 字段扩大到另一个站点。
+            if (domains.Length == 0 || domains.Any(d => !IsValidHostname(d)
+                || !(string.Equals(d, urlHost, StringComparison.Ordinal)
+                    || d.EndsWith("." + urlHost, StringComparison.Ordinal)))) continue;
             result.Add(new SiteDef(e.Id, e.Id, e.Title.Trim(), e.Url.Trim(), domains,
                 Array.Empty<string>(), false, false));
         }
@@ -196,10 +200,27 @@ public static class SiteCatalog
         if (!s.Contains("://")) s = "https://" + s;
         if (!Uri.TryCreate(s, UriKind.Absolute, out var u)) return false;
         if (u.Scheme != "http" && u.Scheme != "https") return false;
+        if (!string.IsNullOrEmpty(u.UserInfo)) return false;
         var h = NormalizeDomain(u.Host);
-        if (h.Length == 0 || h.Any(char.IsWhiteSpace)) return false;
-        if (System.Net.IPAddress.TryParse(h, out _)) return false; // 学习场景不放行裸 IP
+        if (!IsValidHostname(h)) return false;
+        if (System.Net.IPAddress.TryParse(h.Trim('[', ']'), out _)) return false; // 学习场景不放行 IP
         uri = u; host = h;
+        return true;
+    }
+
+    private static bool IsValidHostname(string host)
+    {
+        if (host.Length == 0 || host.Length > 253 || host.EndsWith('.')) return false;
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+
+        var labels = host.Split('.');
+        if (labels.Length < 2) return false; // 防止把 com/net 等宽泛后缀加入白名单
+        foreach (var label in labels)
+        {
+            if (label.Length == 0 || label.Length > 63
+                || !char.IsLetterOrDigit(label[0]) || !char.IsLetterOrDigit(label[^1])) return false;
+            if (label.Any(c => !char.IsLetterOrDigit(c) && c != '-')) return false;
+        }
         return true;
     }
 }

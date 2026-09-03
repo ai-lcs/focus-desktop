@@ -368,6 +368,7 @@ public class PomodoroControl : System.Windows.Controls.UserControl
 
     private void Pause()
     {
+        if (HardLocked) return;
         if (_svc.IsRunning) _svc.Pause(); else if (_svc.CurrentPhase != PomodoroService.Phase.Idle) _svc.Resume();
         Redraw();
     }
@@ -401,9 +402,11 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         _btnPause.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
         _btnReset.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
 
-        // 硬性专注：iOS 式开关视觉（开=金轨道+滑块右移）；重置在工作段进行中禁用
+        // 硬性专注：iOS 式开关视觉（开=金轨道+滑块右移）；工作段进行中禁止中断
         if (_hardWanted)
         {
+            _btnPause.IsEnabled = !HardLocked;
+            _btnPause.Opacity = HardLocked ? 0.45 : 1;
             _btnReset.IsEnabled = !HardLocked;
             _btnReset.Opacity = HardLocked ? 0.45 : 1;
             _hardTrack.Background = Gold;

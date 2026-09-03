@@ -192,6 +192,8 @@ public static class UrlSelfTest
             www != null && www.Domains != null && www.Domains.Count == 1 && www.Domains[0] == "example.com", true);
         CheckBool("ParseCustomInput: ftp:// 拒绝", SiteCatalog.ParseCustomInput("ftp://x.com", null, g3) == null, true);
         CheckBool("ParseCustomInput: 非 URL 拒绝", SiteCatalog.ParseCustomInput("not a url", null, g3) == null, true);
+        CheckBool("ParseCustomInput: URL 用户信息拒绝", SiteCatalog.ParseCustomInput("https://user:pass@example.com", null, g3) == null, true);
+        CheckBool("ParseCustomInput: 单标签主机拒绝", SiteCatalog.ParseCustomInput("https://com", null, g3) == null, true);
         CheckBool("ParseCustomInput: IP 字面量拒绝", SiteCatalog.ParseCustomInput("http://192.168.1.1/", null, g3) == null, true);
         var g3c = new AppSettings();
         CheckBool("ParseCustomInput: 撞 preset 白名单子域 → null",
@@ -213,6 +215,15 @@ public static class UrlSelfTest
         }
         CheckBool("AllocateCustomId: [site,site-2] → site-3",
             SiteCatalog.AllocateCustomId(new[] { "site", "site-2" }) == "site-3", true);
+
+        var unsafeCustom = new AppSettings
+        {
+            Sites = new List<SiteCatalog.SiteEntry>
+            {
+                new() { Id = "unsafe", Title = "Unsafe", Url = "https://service.example.com", Domains = new() { "example.com" } },
+            }
+        };
+        CheckBool("ResolveSites: custom Domains 不能扩大到父域", SiteCatalog.ResolveSites(unsafeCustom).Count == 0, true);
 
         Console.WriteLine($"== 结果: {pass} pass / {fail} fail ==");
         return fail == 0 ? 0 : 1;
