@@ -10,7 +10,7 @@
 #define AppName "Focus Desk"
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
-#define Version "1.0.9"
+#define Version "1.1.0"
 #define Publisher "Kevin Li (ai-lcs)"
 
 [Setup]
@@ -58,6 +58,10 @@ Name: "{group}\{#AppName} 恢复"; Filename: "{app}\{#AppExeName}"; Parameters: 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "启动 {#AppName}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; 先恢复任务栏/会话标志并结束主程序与看门狗，避免卸载后旧实例继续存活。
+Filename: "{app}\{#AppExeName}"; Parameters: "--prepare-uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "PrepareFocusDeskUninstall"
+
 [UninstallDelete]
 ; 只删安装目录自身文件（用户数据在 LocalAppData，见 [Code] 段确认式删除）
 Type: files; Name: "{app}\{#AppExeName}"
@@ -74,6 +78,16 @@ begin
   Result := ExpandConstant('{localappdata}');
 end;
 
+function HasUninstallParam(const ParamName: String): Boolean;
+begin
+  Result := Pos('/' + Uppercase(ParamName), Uppercase(GetCmdTail)) > 0;
+end;
+
+function IsUnattendedUninstall(): Boolean;
+begin
+  Result := HasUninstallParam('VERYSILENT') or HasUninstallParam('SUPPRESSMSGBOXES');
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;
@@ -82,9 +96,11 @@ begin
 
   if CurUninstallStep = usUninstall then
   begin
-    // 安全默认值：交互提示的默认按钮为「否」；静默卸载无法询问，也一律保留。
+    // 安全默认值：无人值守卸载保留数据；正常卸载始终询问，不能因目录探测失败而跳过。
     RemoveUserData := False;
-    if DirExists(DataDir) and (not UninstallSilent()) then
+    if HasUninstallParam('REMOVEUSERDATA') then
+      RemoveUserData := True
+    else if not IsUnattendedUninstall() then
       RemoveUserData := MsgBox(
         '是否同时删除用户数据（配置、网站登录态、背景图）？' + #13#10 +
         '选择「是」= 彻底清理（重新安装会重新出现首次配置向导）；' + #13#10 +

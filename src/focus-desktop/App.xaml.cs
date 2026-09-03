@@ -21,6 +21,26 @@ public partial class App : Application
         _options = AppOptions.Parse(e.Args);
         WireGlobalExceptionHandlers();
 
+        // 卸载器调用：先恢复 Windows 状态，再结束仍在运行的主程序/看门狗。
+        // 必须位于单实例判断之前，否则已有实例会让清理入口直接退出。
+        if (e.Args.Contains("--prepare-uninstall"))
+        {
+            try { TaskbarService.Show(); } catch { }
+            try { RecoveryService.MarkClean(); } catch { }
+            foreach (var process in System.Diagnostics.Process.GetProcessesByName("focus-desktop"))
+            {
+                try
+                {
+                    if (process.Id != Environment.ProcessId)
+                        process.Kill(entireProcessTree: true);
+                }
+                catch { }
+                finally { process.Dispose(); }
+            }
+            Environment.Exit(0);
+            return;
+        }
+
         // --watchdog <pid> [startTicks]：看门狗伴生进程模式（无 UI，Run到主进程消失）
         if (e.Args.Length >= 2 && e.Args[0] == "--watchdog" && int.TryParse(e.Args[1], out var parentPid))
         {

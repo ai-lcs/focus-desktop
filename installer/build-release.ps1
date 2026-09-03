@@ -10,7 +10,7 @@ $src = Join-Path $repo "src\focus-desktop"
 $releaseDir = Join-Path $repo "release"
 $portableDir = Join-Path $releaseDir "focus-desktop"
 $payloadDir = Join-Path $repo "installer\payload"
-$version = "1.0.9"
+$version = "1.1.0"
 
 # --- dotnet 解析：DOTNET_ROOT → PATH → 常见安装位置（vs 纯写死 Kevin 本机路径） ---
 $dotnetExe = $null

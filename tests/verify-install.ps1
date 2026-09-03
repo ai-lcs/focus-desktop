@@ -1,5 +1,5 @@
-﻿# verify-install.ps1 — T10: 安装包真机三态回归（静默装 → 首跑落 LocalAppData → 覆盖装保数据 → 静默卸载保数据/保学习目录）
-# v1.0.9：交互卸载默认保留；静默卸载无法询问，同样默认保留用户数据。
+﻿# verify-install.ps1 — T10: 安装包真机四态回归（静默装 → 首跑进向导 → 覆盖装保数据 → 静默卸载保留/显式清除）
+# v1.1.0：正常卸载始终询问；无人值守卸载默认保留，可用 /REMOVEUSERDATA 显式清除。
 # 前提：installer/build-release.ps1 已产出 release\FocusDesktop-Setup-<version>.exe
 # Setup 路径动态推导（v1.0.2 审计修复：此前写死 1.0.0，版本升级后跑的是磁盘残留旧包 = 假绿）：
 #   优先取仓库 release\ 下最新的 FocusDesktop-Setup-*.exe（时间戳最新），也可用 -Setup 参数显式指定。
@@ -145,6 +145,21 @@ Check "卸载后 exe 移除" (-not (Test-Path "$userInstallDir\focus-desktop.exe
 Check "静默卸载后 LocalAppData 数据默认保留" ((Get-Content "$localData\config.json" -Raw -ErrorAction SilentlyContinue) -match '"configured":\s*true')
 Check "卸载后桌面快捷方式移除" (-not (Test-Path "$desktop\Focus Desk.lnk"))
 Check "学习目录 fixture 原样（装/卸绝不碰）" (Test-Path "$fixtureDir\keep-me.txt")
+
+# ============ 5. 显式清除卸载：只删运行数据，不碰学习目录 ============
+Log "== 5. 显式清除卸载 =="
+$p = Start-Process $Setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -PassThru -Wait
+Check "清除场景重装退出码 0" ($p.ExitCode -eq 0)
+New-Item -ItemType Directory -Path $localData -Force | Out-Null
+Set-Content -Path "$localData\config.json" -Value $wizardDone -Encoding UTF8
+$us = Get-UninstallString
+Check "清除场景卸载入口存在" ($us -ne $null)
+if ($us) {
+    Start-Process cmd -ArgumentList "/c", "`"$us`" /VERYSILENT /SUPPRESSMSGBOXES /REMOVEUSERDATA" -Wait -WindowStyle Hidden
+    Start-Sleep -Seconds 4
+}
+Check "显式清除后 LocalAppData 数据移除" (-not (Test-Path $localData))
+Check "显式清除仍不碰学习目录" (Test-Path "$fixtureDir\keep-me.txt")
 
 }   # ============ try 结束 ============
 finally {

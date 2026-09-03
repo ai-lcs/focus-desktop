@@ -3,8 +3,9 @@
 $ErrorActionPreference = "Continue"
 Add-Type -AssemblyName UIAutomationClient
 
-$exe = "D:\focus-desktop\release\focus-desktop\focus-desktop.exe"
-$dataDir = "D:\focus-desktop\release\focus-desktop\focus-desktop-data"
+$repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$exe = Join-Path $repo "release\focus-desktop\focus-desktop.exe"
+$dataDir = Join-Path $repo "release\focus-desktop\focus-desktop-data"
 $cfg = Join-Path $dataDir "config.json"
 $setupFlag = Join-Path $dataDir "setup_done.flag"
 $backupCfg = "$env:LOCALAPPDATA\Temp\fd-config-backup.json"
@@ -17,8 +18,8 @@ function Check($name, $cond) {
 }
 
 # --- 备份真实配置（Kevin 机器上 DataDir 是活的） ---
-if (Test-Path $cfg) { Copy-Item $cfg $backupCfg -Force }
-if (Test-Path $setupFlag) { Copy-Item $setupFlag $backupFlag -Force }
+if (Test-Path $cfg) { Copy-Item $cfg $backupCfg -Force } else { Remove-Item $backupCfg -ErrorAction SilentlyContinue }
+if (Test-Path $setupFlag) { Copy-Item $setupFlag $backupFlag -Force } else { Remove-Item $backupFlag -ErrorAction SilentlyContinue }
 
 function Kill-App {
     Get-Process "focus-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -331,6 +332,8 @@ Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction S
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $backupCfg) { Copy-Item $backupCfg $cfg -Force } elseif (Test-Path $cfg) { Remove-Item $cfg -Force }
+if (Test-Path $backupFlag) { Copy-Item $backupFlag $setupFlag -Force } elseif (Test-Path $setupFlag) { Remove-Item $setupFlag -Force }
+Remove-Item $backupCfg, $backupFlag -ErrorAction SilentlyContinue
 
 Log ("== RESULT: " + $script:pass + " pass / " + $script:fail + " fail ==")
 if ($script:fail -eq 0) { exit 0 } else { exit 1 }
