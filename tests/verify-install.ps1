@@ -23,10 +23,10 @@ function Check($name, $cond) {
 if (-not $Setup -or -not (Test-Path $Setup)) { Log "FAIL setup exe missing: $Setup"; exit 1 }
 Log ".. 被测安装包：$Setup（$(Get-Item $Setup).LastWriteTime）"
 
-# v1.1.4 交互语义静态契约：避免只验证静默参数，却漏掉用户实际点击的安装/卸载路径。
+# v1.1.5 安装语义静态契约：全新安装无论是否静默都启动首次配置。
 $iss = Get-Content (Join-Path $repo "installer\focus-desktop.iss") -Raw -Encoding UTF8
 Check "交互全新安装自动启动首次配置（非可选 postinstall）" (
-    $iss -match 'Flags:\s*nowait\s+runasoriginaluser\s+skipifsilent;\s*Check:\s*ShouldLaunchFirstRun' -and
+    $iss -match 'Flags:\s*nowait\s+runasoriginaluser;\s*Check:\s*ShouldLaunchFirstRun' -and
     $iss -notmatch 'Flags:[^\r\n]*\bpostinstall\b')
 Check "交互卸载在 InitializeUninstall 询问数据选择" (
     $iss -match 'function\s+InitializeUninstall\(\):\s*Boolean' -and

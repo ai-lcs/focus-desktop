@@ -11,7 +11,7 @@
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
 #ifndef Version
-#define Version "1.1.4"
+#define Version "1.1.5"
 #endif
 #define Publisher "Kevin Li (ai-lcs)"
 
@@ -60,7 +60,7 @@ Name: "{group}\{#AppName} 恢复"; Filename: "{app}\{#AppExeName}"; Parameters: 
 [Run]
 ; 仅全新安装自动启动首次配置。升级安装保留数据且不自动进入专注模式。
 ; 不使用 postinstall：它只是完成页上的可选复选框，用户取消后不会启动首次配置。
-Filename: "{app}\{#AppExeName}"; Flags: nowait runasoriginaluser skipifsilent; Check: ShouldLaunchFirstRun
+Filename: "{app}\{#AppExeName}"; Flags: nowait runasoriginaluser; Check: ShouldLaunchFirstRun
 
 [UninstallRun]
 ; 先恢复任务栏/会话标志并结束主程序与看门狗，避免卸载后旧实例继续存活。
