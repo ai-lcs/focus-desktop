@@ -19,12 +19,12 @@
 
 ## 下载
 
-前往 [GitHub Releases](https://github.com/ai-lcs/focus-desktop/releases/latest) 下载最新版（当前为 `v1.0.7`）。
+前往 [GitHub Releases](https://github.com/ai-lcs/focus-desktop/releases/latest) 下载最新版（当前为 `v1.0.8`）。
 
 | 版本 | 适合谁 |
 | --- | --- |
-| `FocusDesktop-Setup-1.0.7.exe` | 大多数用户。正常安装、升级和卸载。 |
-| `focus-desktop-portable-1.0.7.zip` | 不想安装的用户。解压后直接运行。 |
+| `FocusDesktop-Setup-1.0.8.exe` | 大多数用户。正常安装、升级和卸载。 |
+| `focus-desktop-portable-1.0.8.zip` | 不想安装的用户。解压后直接运行。 |
 
 两种版本功能一致，应用本身是自包含发布，不需要另外安装 .NET。WebView2 是 Windows 上的网页内核；如果电脑没有它，应用会给出安装提示，可从[微软官方页面](https://developer.microsoft.com/microsoft-edge/webview2/)安装。
 
@@ -32,10 +32,10 @@
 
 项目目前没有购买代码签名证书，所以第一次运行时，Windows 可能显示“已保护你的电脑”。这是 SmartScreen 对未签名程序的常见提示：点击“更多信息”，再点击“仍要运行”即可。
 
-你也可以在下载后自行校验 SHA-256。Release 页面同时提供 `v1.0.7-sha256.txt`，PowerShell 命令示例：
+你也可以在下载后自行校验 SHA-256。Release 页面同时提供 `v1.0.8-sha256.txt`，PowerShell 命令示例：
 
 ```powershell
-Get-FileHash .\FocusDesktop-Setup-1.0.7.exe -Algorithm SHA256
+Get-FileHash .\FocusDesktop-Setup-1.0.8.exe -Algorithm SHA256
 ```
 
 ## 第一次使用
@@ -48,7 +48,7 @@ Get-FileHash .\FocusDesktop-Setup-1.0.7.exe -Algorithm SHA256
 
 每一步都可以先预览。确认配置后，去需要的网站登录一次，再点击“开始专注”。登录状态保存在本机的浏览器数据中，下一次再打开仍保持登录状态。
 
-配置完成后，日常界面不会提供随手修改配置的入口。这是有意的：专注时少一个可以反复折腾的设置，就少一个分心的机会。需要重新配置时，可以卸载并在卸载提示中选择删除配置和登录数据，再重新安装；学习文件夹不会被卸载程序删除。
+配置完成后，日常界面不会提供随手修改配置的入口。这是有意的：专注时少一个可以反复折腾的设置，就少一个分心的机会。需要重新配置时，直接卸载再重装即可——卸载时默认会删除全部用户数据（配置、网站登录态），重新安装会重新出现首次配置向导；如只想升级程序、保留配置，在卸载提示中选择「否」。学习文件夹永远不会被卸载程序删除。
 
 ## 日常操作
 

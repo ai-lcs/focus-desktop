@@ -1,17 +1,17 @@
-; focus-desktop Inno Setup 脚本（Public v1）
+﻿; focus-desktop Inno Setup 脚本（Public v1）
 ; 构建：installer/build-release.ps1 调 ISCC 编译本脚本。
 ; 产物：FocusDesktop-Setup-<version>.exe
 ; 关键语义：
 ;  - 装到 {autopf}\FocusDesk（Program Files）；无 portable.flag → 运行数据落 %LOCALAPPDATA%\focus-desktop
 ;  - 升级：覆盖装（AppId 固定），LocalAppData 数据天然保留
-;  - 卸载：开始前明确询问，默认保留 %LOCALAPPDATA%\focus-desktop；仅确认后删除；绝不触碰 StudyFolder
+;  - 卸载：开始前明确询问，默认清除 %LOCALAPPDATA%\focus-desktop（重装=重新走首次配置）；绝不触碰 StudyFolder
 ;  - 快捷方式：桌面 + 开始菜单；「恢复」入口指向 --restore
 
 #define AppName "Focus Desk"
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
 #ifndef Version
-#define Version "1.1.5"
+#define Version "1.0.8"
 #endif
 #define Publisher "Kevin Li (ai-lcs)"
 
@@ -101,16 +101,17 @@ end;
 
 function InitializeUninstall(): Boolean;
 begin
-  // 无人值守卸载默认保留；显式参数清除；正常卸载在任何删除动作前先询问。
+  // 正常卸载默认彻底清理（本应用设计约定：重装=重新走首次配置向导，见 README）。
+  // 无人值守（VERYSILENT/SUPPRESSMSGBOXES）保持安全默认：保留数据；显式 /REMOVEUSERDATA 强制清除。
   RemoveUserData := False;
   if HasUninstallParam('REMOVEUSERDATA') then
     RemoveUserData := True
   else if not IsUnattendedUninstall() then
     RemoveUserData := MsgBox(
-      '是否同时删除用户数据（配置、网站登录态、背景图）？' + #13#10 +
-      '选择「是」= 彻底清理（重新安装会重新出现首次配置向导）；' + #13#10 +
-      '选择「否」= 保留（重新安装后沿用现有配置）。',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+      '卸载并删除全部用户数据（配置、网站登录态）？' + #13#10 +
+      '「是」= 彻底清理（默认。重新安装会重新出现首次配置向导）；' + #13#10 +
+      '「否」= 仅卸载程序、保留数据（重新安装后沿用现有配置）。',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON1) = IDYES;
   Result := True;
 end;
 
