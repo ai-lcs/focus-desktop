@@ -23,6 +23,18 @@ function Check($name, $cond) {
 if (-not $Setup -or -not (Test-Path $Setup)) { Log "FAIL setup exe missing: $Setup"; exit 1 }
 Log ".. 被测安装包：$Setup（$(Get-Item $Setup).LastWriteTime）"
 
+# v1.1.3 交互语义静态契约：避免只验证静默参数，却漏掉用户实际点击的安装/卸载路径。
+$iss = Get-Content (Join-Path $repo "installer\focus-desktop.iss") -Raw -Encoding UTF8
+Check "交互全新安装自动启动首次配置（非可选 postinstall）" (
+    $iss -match 'Flags:\s*nowait\s+runasoriginaluser\s+skipifsilent;\s*Check:\s*ShouldLaunchFirstRun' -and
+    $iss -notmatch 'Flags:[^\r\n]*\bpostinstall\b')
+Check "交互卸载在 InitializeUninstall 询问数据选择" (
+    $iss -match 'function\s+InitializeUninstall\(\):\s*Boolean' -and
+    $iss -match "MsgBox\(")
+Check "用户数据在卸载运行阶段按选择清除" (
+    $iss -match 'CurUninstallStep\s*=\s*usPostUninstall' -and
+    $iss -match 'DelTree\(DataDir,\s*True,\s*True,\s*True\)')
+
 function Get-UninstallString {
     $keys = @(
         "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{7B3F9E2A-6C1D-4E8B-9F5A-F2D8C4A1E6B0}_is1",

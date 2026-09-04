@@ -11,7 +11,7 @@
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
 #ifndef Version
-#define Version "1.1.2"
+#define Version "1.1.3"
 #endif
 #define Publisher "Kevin Li (ai-lcs)"
 
@@ -58,14 +58,16 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{group}\{#AppName} 恢复"; Filename: "{app}\{#AppExeName}"; Parameters: "--restore"; WorkingDir: "{app}"; Comment: "任务栏丢失/异常退出后双击恢复"
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "启动 {#AppName}"; Flags: nowait postinstall skipifsilent
+; 仅全新安装自动启动首次配置。升级安装保留数据且不自动进入专注模式。
+; 不使用 postinstall：它只是完成页上的可选复选框，用户取消后不会启动首次配置。
+Filename: "{app}\{#AppExeName}"; Flags: nowait runasoriginaluser skipifsilent; Check: ShouldLaunchFirstRun
 
 [UninstallRun]
 ; 先恢复任务栏/会话标志并结束主程序与看门狗，避免卸载后旧实例继续存活。
 Filename: "{app}\{#AppExeName}"; Parameters: "--prepare-uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "PrepareFocusDeskUninstall"
 
 [UninstallDelete]
-; 只删安装目录自身文件（用户数据在 LocalAppData，见 [Code] 段确认式删除）
+; 安装目录始终清理；用户数据在 [Code] 的卸载运行阶段按明确选择删除。
 Type: files; Name: "{app}\{#AppExeName}"
 Type: files; Name: "{app}\focus-desktop-watchdog.exe"
 
@@ -75,6 +77,7 @@ const
 
 var
   RemoveUserData: Boolean;
+  FreshDataAtInstall: Boolean;
 
 function LocalAppDataPath(): String;
 begin
@@ -91,27 +94,40 @@ begin
   Result := HasUninstallParam('VERYSILENT') or HasUninstallParam('SUPPRESSMSGBOXES');
 end;
 
+function InitializeSetup(): Boolean;
+begin
+  FreshDataAtInstall := not DirExists(AddBackslash(LocalAppDataPath()) + LocalDataDir);
+  Result := True;
+end;
+
+function ShouldLaunchFirstRun(): Boolean;
+begin
+  Result := FreshDataAtInstall;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  // 无人值守卸载默认保留；显式参数清除；正常卸载在任何删除动作前先询问。
+  RemoveUserData := False;
+  if HasUninstallParam('REMOVEUSERDATA') then
+    RemoveUserData := True
+  else if not IsUnattendedUninstall() then
+    RemoveUserData := MsgBox(
+      '是否同时删除用户数据（配置、网站登录态、背景图）？' + #13#10 +
+      '选择「是」= 彻底清理（重新安装会重新出现首次配置向导）；' + #13#10 +
+      '选择「否」= 保留（重新安装后沿用现有配置）。',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  Result := True;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;
 begin
-  DataDir := AddBackslash(LocalAppDataPath()) + LocalDataDir;
-
-  if CurUninstallStep = usUninstall then
+  if (CurUninstallStep = usPostUninstall) and RemoveUserData then
   begin
-    // 安全默认值：无人值守卸载保留数据；正常卸载始终询问，不能因目录探测失败而跳过。
-    RemoveUserData := False;
-    if HasUninstallParam('REMOVEUSERDATA') then
-      RemoveUserData := True
-    else if not IsUnattendedUninstall() then
-      RemoveUserData := MsgBox(
-        '是否同时删除用户数据（配置、网站登录态、背景图）？' + #13#10 +
-        '选择「是」= 彻底清理（重新安装会重新出现首次配置向导）；' + #13#10 +
-        '选择「否」= 保留（重新安装后沿用现有配置）。',
-        mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
-  end
-  else if (CurUninstallStep = usPostUninstall) and RemoveUserData and DirExists(DataDir) then
-  begin
-    DelTree(DataDir, True, True, True);
+    DataDir := AddBackslash(LocalAppDataPath()) + LocalDataDir;
+    if DirExists(DataDir) then
+      DelTree(DataDir, True, True, True);
   end;
 end;
