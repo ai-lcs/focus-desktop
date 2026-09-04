@@ -11,7 +11,7 @@
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
 #ifndef Version
-#define Version "1.1.3"
+#define Version "1.1.4"
 #endif
 #define Publisher "Kevin Li (ai-lcs)"
 
@@ -77,7 +77,6 @@ const
 
 var
   RemoveUserData: Boolean;
-  FreshDataAtInstall: Boolean;
 
 function LocalAppDataPath(): String;
 begin
@@ -94,15 +93,10 @@ begin
   Result := HasUninstallParam('VERYSILENT') or HasUninstallParam('SUPPRESSMSGBOXES');
 end;
 
-function InitializeSetup(): Boolean;
-begin
-  FreshDataAtInstall := not DirExists(AddBackslash(LocalAppDataPath()) + LocalDataDir);
-  Result := True;
-end;
-
 function ShouldLaunchFirstRun(): Boolean;
 begin
-  Result := FreshDataAtInstall;
+  // 直接在 [Run] 真正执行时检查，不能依赖初始化阶段缓存的全局变量。
+  Result := not DirExists(AddBackslash(LocalAppDataPath()) + LocalDataDir);
 end;
 
 function InitializeUninstall(): Boolean;
