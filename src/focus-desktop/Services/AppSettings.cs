@@ -77,12 +77,59 @@ public class AppSettings
     [JsonPropertyName("backgroundImage")]
     public string? BackgroundImage { get; set; }
 
+    /// <summary>外部应用名单已由用户确认。null/null 保留为旧配置的待补充状态。</summary>
+    [JsonPropertyName("externalAppsConfirmed")]
+    public bool? ExternalAppsConfirmed { get; set; }
+
+    /// <summary>冻结的外部应用入口；只有显式确认后才允许为空列表。</summary>
+    [JsonPropertyName("externalApps")]
+    public List<ExternalAppEntry>? ExternalApps { get; set; }
+
     /// <summary>瞬态实例（预览草稿）：Save() 拒绝落盘。仅内存态，不序列化。</summary>
     [JsonIgnore]
     public bool IsTransient { get; set; }
 
     /// <summary>是否已完成首次配置（冻结）。判据只认显式 true：旧配置缺失该字段视为未完成。</summary>
     public bool IsConfigured() => Configured == true;
+
+    /// <summary>检查外部应用配置的三态与结构。运行时文件存在性由启动服务处理。</summary>
+    public bool TryValidateExternalApps(out string? error)
+    {
+        error = null;
+        if (ExternalAppsConfirmed == null && ExternalApps == null)
+            return true; // 旧配置：尚未确认这一项
+
+        if (ExternalAppsConfirmed != true || ExternalApps == null)
+        {
+            error = "外部应用名单确认状态与名单内容不一致。";
+            return false;
+        }
+
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var orders = new HashSet<int>();
+        foreach (var entry in ExternalApps)
+        {
+            if (entry == null)
+            {
+                error = "外部应用名单中包含空入口。";
+                return false;
+            }
+            if (!entry.TryValidate(out error))
+                return false;
+            if (!ids.Add(entry.Id))
+            {
+                error = "外部应用名单中有重复的入口标识。";
+                return false;
+            }
+            if (!orders.Add(entry.Order))
+            {
+                error = "外部应用名单中有重复的顺序号。";
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>legacy v1 配置（有实质旧字段但无 schemaVersion）。升级后应保持原有行为。</summary>
     public bool IsLegacyConfig() => SchemaVersion == null && Configured == null && Whitelist.Count > 0;
@@ -91,20 +138,24 @@ public class AppSettings
 
     public static AppSettings LoadOrDefault() => LoadOrDefault(out _);
 
-    public static AppSettings LoadOrDefault(out ConfigLoadStatus status)
+    public static AppSettings LoadOrDefault(out ConfigLoadStatus status) =>
+        LoadFromPath(Paths.ConfigFile, out status);
+
+    internal static AppSettings LoadFromPath(string configPath, out ConfigLoadStatus status)
     {
         try
         {
-            if (!File.Exists(Paths.ConfigFile))
+            if (!File.Exists(configPath))
             {
                 status = ConfigLoadStatus.Missing;
                 return new AppSettings();
             }
 
-            var cfg = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Paths.ConfigFile));
+            var cfg = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(configPath));
             // JSON 语法正确但关键集合被显式写成 null，同样不能当作可运行配置。
             if (cfg != null && cfg.Whitelist != null && cfg.LoginDomains != null
-                && cfg.StudyFolder != null && cfg.ExitPhrase != null && cfg.FocusQuote != null)
+                && cfg.StudyFolder != null && cfg.ExitPhrase != null && cfg.FocusQuote != null
+                && cfg.TryValidateExternalApps(out _))
             {
                 status = ConfigLoadStatus.Valid;
                 return cfg;
@@ -112,7 +163,7 @@ public class AppSettings
         }
         catch
         {
-            // 继续走 Corrupt 分支：启动层会隔离原文件并进入向导，不直接锁定。
+            // 继续走 Corrupt 分支：启动层提示后退出；不隔离或改写原文件。
         }
         status = ConfigLoadStatus.Corrupt;
         return new AppSettings { Configured = false };
@@ -136,9 +187,19 @@ public class AppSettings
 
     public void Save()
     {
-        if (IsTransient) return; // 预览草稿等瞬态实例：绝不落盘（真预览链路 T5 契约）
+        if (IsTransient) return;
         Paths.EnsureDirectories();
-        AtomicFile.WriteAllText(Paths.ConfigFile,
+        SaveToPath(Paths.ConfigFile);
+    }
+
+    internal void SaveToPath(string configPath)
+    {
+        if (IsTransient) return; // 预览草稿等瞬态实例：绝不落盘（真预览链路 T5 契约）
+        if (!TryValidateExternalApps(out var error))
+            throw new InvalidDataException(error);
+        var directory = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+        AtomicFile.WriteAllText(configPath,
             JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
     }
 }

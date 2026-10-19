@@ -1,82 +1,189 @@
-using System.IO;
 namespace focus_desktop.Services;
 
-/// <summary>
-/// 焦点模式编排（spec §4 的 EnterFocusMode / ExitFocusMode / RecoverWindowsState）。
-/// 恢复代码只有一份（Recover/Exit 共用内核），任何死法都汇到这。
-/// 顺序纪律：Enter 先写脏标志再做任何系统修改；Exit 先拆系统修改最后清标志。
-/// 这样中间任何一步崩，脏标志都残留 → 下次启动自愈。
-/// </summary>
+/// <summary>Coordinates focus lock, Dock lifetime, and Windows recovery.</summary>
 public sealed class FocusModeService
 {
     private readonly KeyboardGuardService _keyboard = new();
+    private MainWindow? _mainWindow;
+    private IReadOnlyList<ExternalAppEntry> _dockEntries = Array.Empty<ExternalAppEntry>();
+    private DockWindow? _dock;
+    private bool _registerAppBarWhenActive;
+    private bool _dockReleaseConfirmed = true;
+    private bool _sessionStartedByThisInstance;
 
     public bool IsActive { get; private set; }
+    public bool HasRecoveryResponsibility => IsActive || _dock != null || RecoveryService.WasActiveLastTime();
+    public bool IsExternalWindowForeground => _dock?.IsExternalWindowForeground == true;
 
-    /// <summary>进入锁定：脏标志 → 看门狗 → 隐藏任务栏 → 挂钩子。</summary>
+    public void ConfigureDock(MainWindow mainWindow, IEnumerable<ExternalAppEntry> entries, bool registerAppBarWhenActive)
+    {
+        ArgumentNullException.ThrowIfNull(mainWindow);
+        ArgumentNullException.ThrowIfNull(entries);
+        _mainWindow = mainWindow;
+        _dockEntries = entries.OrderBy(entry => entry.Order).ToArray();
+        _registerAppBarWhenActive = registerAppBarWhenActive;
+        if (_dockEntries.Count == 0) ReleaseDock();
+    }
+
+    public void RefreshDockSettings(IEnumerable<ExternalAppEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        _dockEntries = entries.OrderBy(entry => entry.Order).ToArray();
+        if (_dockEntries.Count == 0)
+        {
+            ReleaseDock();
+            return;
+        }
+
+        if (IsActive && !StartDock(_registerAppBarWhenActive)) Recover();
+    }
+
+    public bool ShowDevelopmentDock(bool registerAppBar)
+    {
+        if (StartDock(registerAppBar)) return true;
+        Recover();
+        _mainWindow?.ReturnToFocusDesk();
+        return false;
+    }
+
+    internal bool TryGetAppBarLayout(out AppBarLayout layout)
+    {
+        if (_dock != null && _dock.TryGetAppBarLayout(out layout)) return true;
+        layout = default;
+        return false;
+    }
+
+    /// <summary>Enters focus mode: preserve recovery marker until every owned system change is released.</summary>
     public void Enter()
     {
         if (IsActive) return;
         try
         {
-            RecoveryService.MarkActive(); // 1. 先立牌：从这一刻起崩了下次要自愈
+            MonitorWorkAreaSnapshot? originalMonitor = null;
+            if (_registerAppBarWhenActive)
+            {
+                if (_mainWindow == null || !AppBarWindowService.TryCaptureMonitorSnapshot(_mainWindow, out var snapshot))
+                    throw new InvalidOperationException("无法读取 Dock 显示器的原工作区，已取消专注模式。");
+                originalMonitor = snapshot;
+            }
 
-            WatchdogService.Launch();     // 2. 看门狗伴生进程（taskkill /f 等进程突然消失时兜底恢复）
-
-            TaskbarService.Hide();        // 3. 藏任务栏
-
-            _keyboard.Install();          // 4. 挂键盘钩子（最后挂：钩子要在 UI 线程消息循环里活着）
-
+            RecoveryService.MarkActive(originalMonitor);
+            _sessionStartedByThisInstance = true;
+            WatchdogService.Launch();
+            TaskbarService.Hide();
+            _keyboard.Install();
+            if (!StartDock(_registerAppBarWhenActive))
+                throw new InvalidOperationException("Dock 无法注册为 Windows 桌面栏，已回滚专注模式。");
             IsActive = true;
         }
         catch
         {
-            // 任一步失败都在把异常交给上层前完成回滚，避免依赖外部异常处理器。
             Recover();
             throw;
         }
     }
 
-    /// <summary>正常退出：钩子 → 任务栏 → 杀看门狗 → 确认恢复后清标志。完全倒序。</summary>
     public void Exit()
     {
-        if (!IsActive) return;
+        if (!IsActive && _dock == null) return;
         IsActive = false;
-
-        _keyboard.Uninstall();        // 1. 先放键盘——最影响用户的一层
-
-        var shown = TaskbarService.Show(); // 2. 恢复任务栏（含 explorer 兜底）
-
-        WatchdogService.Stop();       // 3. 杀看门狗（恢复已完成，它无事可做）
-
-        if (shown) RecoveryService.MarkClean(); // 4. 只有确认任务栏恢复后才清牌，保留下次启动自愈机会
-
-        if (!shown)
-        {
-            CrashReporter.Write(
-                new InvalidOperationException("退出时任务栏恢复后仍不可见（explorer 兜底也未确认），已写日志。可用 --restore 手动恢复"),
-                "focus-exit-taskbar-uncertain");
-        }
+        _keyboard.Uninstall();
+        var dockReleased = ReleaseDock();
+        var taskbarRestored = TaskbarService.Show();
+        if (dockReleased && taskbarRestored && RecoveryService.WasActiveLastTime())
+            dockReleased = RecoveryService.TryConfirmOwnedAppBarReleased(out _);
+        CompleteRecovery(taskbarRestored, dockReleased, "focus-exit-recovery-uncertain");
     }
 
-    /// <summary>异常/未知状态恢复：吞一切异常，尽力而为。幂等——重复调用无害。</summary>
     public void Recover()
     {
-        try { _keyboard.Uninstall(); } catch { }
-        var shown = false;
-        try { shown = TaskbarService.Show(); } catch { }
-        try { WatchdogService.Stop(); } catch { }
-        if (shown)
-        {
-            try { RecoveryService.MarkClean(); } catch { }
-        }
         IsActive = false;
+        try { _keyboard.Uninstall(); } catch { }
+        var hasOwnedDock = _dock != null;
+        var dockReleased = hasOwnedDock ? ReleaseDock() : _dockReleaseConfirmed;
+        var taskbarRestored = false;
+        try { taskbarRestored = TaskbarService.Show(); } catch { }
+        if (taskbarRestored && RecoveryService.WasActiveLastTime())
+        {
+            if (_sessionStartedByThisInstance || hasOwnedDock)
+            {
+                // This instance owns the marker and has closed its Dock. Verify registered AppBar
+                // geometry after Taskbar.Show; an initialization failure before registration is
+                // covered by the local no-AppBar state.
+                var locallyReleased = hasOwnedDock ? dockReleased : _dockReleaseConfirmed;
+                dockReleased = locallyReleased && RecoveryService.TryConfirmOwnedAppBarReleased(out _);
+            }
+            else if (!hasOwnedDock)
+            {
+                try { dockReleased = RecoveryService.TryConfirmAppBarReleased(null, null, out _); } catch { }
+            }
+        }
+        try { CompleteRecovery(taskbarRestored, dockReleased, "focus-recovery-uncertain"); } catch { }
     }
 
-    /// <summary>OnExit 调用：激活过才走完整退出流程。</summary>
     public void ExitIfActive()
     {
-        if (IsActive) Exit();
-        else Recover(); // 没激活过也可能残留系统状态（如 Enter 中途崩）——顺手幂等恢复
+        if (IsActive || _dock != null) Exit();
+        else Recover();
+    }
+
+    public static bool CanMarkRecoveryClean(bool taskbarRestored, bool dockReleased) =>
+        taskbarRestored && dockReleased;
+
+    private bool StartDock(bool registerAppBar)
+    {
+        if (_dockEntries.Count == 0) return true;
+        if (_dock != null) return !_dock.IsClosed;
+        if (_mainWindow == null) return false;
+
+        try
+        {
+            if (registerAppBar) _mainWindow.PrepareForAppBarDock();
+            var dock = new DockWindow(_mainWindow, this, _dockEntries, _keyboard);
+            _dock = dock;
+            _dockReleaseConfirmed = false;
+            if (!dock.TryShowDock(registerAppBar)) return false;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool ReleaseDock()
+    {
+        var dock = _dock;
+        if (dock == null) return _dockReleaseConfirmed;
+
+        bool appBarReleased;
+        try { appBarReleased = dock.ReleaseAppBar(); } catch { appBarReleased = false; }
+        if (!appBarReleased) return false;
+
+        if (!dock.IsClosed)
+        {
+            try { dock.Close(); } catch { }
+        }
+
+        _dockReleaseConfirmed = dock.IsClosed && dock.IsAppBarReleased;
+        if (_dockReleaseConfirmed)
+        {
+            _dock = null;
+        }
+        return _dockReleaseConfirmed;
+    }
+
+    private void CompleteRecovery(bool taskbarRestored, bool dockReleased, string source)
+    {
+        if (CanMarkRecoveryClean(taskbarRestored, dockReleased))
+        {
+            RecoveryService.MarkClean();
+            _sessionStartedByThisInstance = false;
+            WatchdogService.Stop();
+            return;
+        }
+
+        CrashReporter.Write(new InvalidOperationException(
+            $"恢复状态未确认：任务栏={taskbarRestored}，Dock/AppBar={dockReleased}；保留恢复标记。"), source);
     }
 }

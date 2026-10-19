@@ -14,6 +14,9 @@ namespace focus_desktop;
 
 public partial class MainWindow : Window
 {
+    internal const int WmPrepareUninstall = 0x8000 + 0x5A1;
+    internal const int WmQueryPrepareUninstall = 0x8000 + 0x5A2;
+
     private readonly AppOptions _options;
     private readonly FocusModeService _focus;
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -177,6 +180,85 @@ public partial class MainWindow : Window
         ApplyCommittedConfig();
         _ = WarmupAfterDelayAsync();
     }
+
+    internal void ConfigureDock(AppSettings settings, bool registerAppBarWhenActive)
+    {
+        var entries = settings.ExternalAppsConfirmed == true
+            && settings.TryValidateExternalApps(out _)
+                ? settings.ExternalApps ?? new List<ExternalAppEntry>()
+                : new List<ExternalAppEntry>();
+        _focus.ConfigureDock(this, entries, registerAppBarWhenActive);
+    }
+
+    internal void PrepareForAppBarDock()
+    {
+        if (WindowState != WindowState.Normal) WindowState = WindowState.Normal;
+        Left = 48;
+        Top = 32;
+        Width = Math.Min(640, SystemParameters.PrimaryScreenWidth / 2);
+        Height = Math.Min(480, SystemParameters.PrimaryScreenHeight / 2);
+    }
+
+    internal void ApplyAppBarWorkArea(DesktopRect workArea)
+    {
+        if (workArea.Width <= 0 || workArea.Height <= 0) return;
+
+        if (WindowState != WindowState.Normal) WindowState = WindowState.Normal;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var dpi = GetWindowDpi(hwnd);
+        var scale = 96d / dpi;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = workArea.Left * scale;
+        Top = workArea.Top * scale;
+        Width = workArea.Width * scale;
+        Height = workArea.Height * scale;
+    }
+
+    private static uint GetWindowDpi(IntPtr hwnd)
+    {
+        try
+        {
+            var dpi = GetDpiForWindow(hwnd);
+            return dpi == 0 ? 96u : dpi;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return 96u;
+        }
+    }
+
+    internal void ApplyFocusModeBounds()
+    {
+        Topmost = true;
+        if (_focus.TryGetAppBarLayout(out var layout)) ApplyAppBarWorkArea(layout.WorkArea);
+        else WindowState = WindowState.Maximized;
+    }
+
+    /// <summary>Updates only the frozen external-app list; it does not reconfigure WebView tabs.</summary>
+    internal void RefreshDockSettings(AppSettings settings)
+    {
+        var entries = settings.ExternalAppsConfirmed == true
+            && settings.TryValidateExternalApps(out _)
+                ? settings.ExternalApps ?? new List<ExternalAppEntry>()
+                : new List<ExternalAppEntry>();
+        _focus.RefreshDockSettings(entries);
+    }
+
+    internal void PrepareForExternalWindow() => Topmost = false;
+
+    internal void ReturnToFocusDesk()
+    {
+        if (!IsVisible) Show();
+        Topmost = _focus.IsActive;
+        if (_focus.TryGetAppBarLayout(out var layout)) ApplyAppBarWorkArea(layout.WorkArea);
+        else WindowState = WindowState.Maximized;
+        Activate();
+        SetForegroundWindow(new WindowInteropHelper(this).Handle);
+    }
+
+    internal void ReportFocusRecoveryError(string reason) =>
+        MessageBox.Show($"{reason}\n\n专注锁定已退出，Focus Desk 已恢复为可操作窗口。",
+            "Focus Desk 恢复", MessageBoxButton.OK, MessageBoxImage.Warning);
 
     /// <summary>
     /// 首配提交后把最终配置应用到当轮 UI（P0 展示层闭环）：MainWindow 在提交前构造，
@@ -1319,12 +1401,24 @@ public partial class MainWindow : Window
         };
         startBtn.Click += (_, _) =>
         {
-            FirstRunSetup.CompleteSetup();
-            banner.Visibility = Visibility.Collapsed;
-            _focus.Enter(); // 从这一刻起锁定
-            Topmost = true;
-            WindowState = WindowState.Maximized;
-            ShowBlocked("已进入专注模式");
+            try
+            {
+                _focus.Enter(); // 从这一刻起锁定
+                FirstRunSetup.CompleteSetup();
+                banner.Visibility = Visibility.Collapsed;
+                ApplyFocusModeBounds();
+                ShowBlocked("已进入专注模式");
+            }
+            catch (Exception ex)
+            {
+                _focus.Recover();
+                ReturnToFocusDesk();
+                var recoveryStatus = RecoveryService.WasActiveLastTime()
+                    ? "系统恢复状态仍未确认，恢复标记已保留；Focus Desk 不会继续锁定。请先运行 --restore 并按提示恢复显示器工作区。"
+                    : "系统恢复状态已确认。修正原因后可以重试。";
+                MessageBox.Show($"无法进入专注模式。\n\n{recoveryStatus}\n\n{ex.Message}",
+                    "Focus Desk", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         };
         sp.Children.Add(startBtn);
         banner.Child = sp;
@@ -1348,6 +1442,11 @@ public partial class MainWindow : Window
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
+        if (_focus.IsExternalWindowForeground)
+        {
+            App.SmokeLog("window: content rendered while an approved external app is foreground; activation skipped");
+            return;
+        }
         // 显式夺取前台：Windows ForegroundLockTimeout 可能阻止新进程抢焦点
         Activate();
         var hwnd = new WindowInteropHelper(this).Handle;
@@ -1358,9 +1457,25 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll", EntryPoint = "GetDpiForWindow", ExactSpelling = true)]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         const int WM_CLOSE = 0x0010;
+        if (msg == WmQueryPrepareUninstall)
+        {
+            handled = true;
+            return new IntPtr(1);
+        }
+        if (msg == WmPrepareUninstall)
+        {
+            handled = true;
+            try { _focus.ExitIfActive(); } catch { }
+            _recoveryExitDone = true;
+            Application.Current.Shutdown();
+            return IntPtr.Zero;
+        }
         if (msg == WM_CLOSE && _focus.IsActive)
         {
             handled = true; // 锁定期间不响应系统关闭（退出只能走软件内按钮）

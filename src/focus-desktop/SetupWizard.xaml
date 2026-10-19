@@ -1,6 +1,7 @@
 <Window x:Class="focus_desktop.SetupWizard"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:focus_desktop"
         Title="focus-desktop 首次配置"
         WindowStyle="SingleBorderWindow"
         ResizeMode="CanResize"
@@ -112,6 +113,8 @@
                 <TextBlock x:Name="Step2Indicator" Text="2 站点" FontSize="16" Margin="10,0,10,0" Foreground="{StaticResource WzStepInactive}"/>
                 <TextBlock Text="·" FontSize="16" Foreground="{StaticResource WzStepInactive}"/>
                 <TextBlock x:Name="Step3Indicator" Text="3 专注" FontSize="16" Margin="10,0,10,0" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock Text="·" FontSize="16" Foreground="{StaticResource WzStepInactive}"/>
+                <TextBlock x:Name="Step4Indicator" Text="4 软件" FontSize="16" Margin="10,0,0,0" Foreground="{StaticResource WzStepInactive}"/>
             </StackPanel>
         </Border>
 
@@ -256,6 +259,17 @@
                                    Margin="0,14,0,0" Visibility="Collapsed"/>
                     </StackPanel>
                 </ScrollViewer>
+            </Grid>
+
+            <!-- 第 4 步：外部应用名单；选择只保存在向导草稿中，直到最终提交。 -->
+            <Grid x:Name="Step4Panel" Visibility="Collapsed" Margin="48,22,48,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <local:ExternalAppSelectionControl x:Name="ExternalAppsPicker" Grid.Row="0"/>
+                <TextBlock x:Name="ExternalAppsError" Grid.Row="1" Visibility="Collapsed" Margin="0,8,0,0"
+                           FontSize="13" TextWrapping="Wrap" Foreground="{StaticResource WzDanger}"/>
             </Grid>
         </Grid>
 

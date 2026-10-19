@@ -26,6 +26,7 @@ public sealed class KeyboardGuardService : IDisposable
     private const int VK_RWIN = 0x5C;
     private const int VK_F4 = 0x73;
     private const int VK_CONTROL = 0x11;
+    private const int VK_SHIFT = 0x10;
     private const int VK_MENU = 0x12; // Alt
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
@@ -59,6 +60,7 @@ public sealed class KeyboardGuardService : IDisposable
     // 委托必须存字段保活：SetWindowsHookEx 只存函数指针，GC 回收委托 = 回调进已释放内存 = 崩溃
     private readonly LowLevelKeyboardProc _proc;
     private IntPtr _hookId = IntPtr.Zero;
+    private HashSet<IntPtr> _allowedExternalWindows = new();
 
     public bool IsInstalled => _hookId != IntPtr.Zero;
 
@@ -66,6 +68,9 @@ public sealed class KeyboardGuardService : IDisposable
     {
         _proc = HookCallback;
     }
+
+    public void ReplaceAllowedExternalWindows(IEnumerable<IntPtr> windows) =>
+        Volatile.Write(ref _allowedExternalWindows, windows.Where(hwnd => hwnd != IntPtr.Zero).ToHashSet());
 
     /// <summary>安装钩子。须在带消息循环的 UI 线程调用（WPF 主线程满足）。</summary>
     public void Install()
@@ -117,7 +122,7 @@ public sealed class KeyboardGuardService : IDisposable
     }
 
     /// <summary>拦截判定。基本款（用户已拍板）：Alt 组合 + Win 键系 + Ctrl+Esc。</summary>
-    private static bool ShouldBlock(long message, uint vk)
+    private bool ShouldBlock(long message, uint vk)
     {
         bool IsDown(int m) => message == m;
 
@@ -130,15 +135,12 @@ public sealed class KeyboardGuardService : IDisposable
         // Alt 组合（WM_SYSKEYDOWN）
         if (IsDown(WM_SYSKEYDOWN) && AltHeld())
         {
-            // Alt+Tab / Alt+F4 / Alt+Esc / Alt+Space（系统菜单）
-            if (vk is VK_TAB or VK_F4 or VK_ESCAPE or VK_SPACE)
-            {
-                return true;
-            }
+            if (vk is VK_TAB or VK_ESCAPE) return true;
+            if (vk is VK_F4 or VK_SPACE) return !IsAllowedExternalForeground();
         }
 
         // Ctrl+Esc（开始菜单的另一条路）
-        if (IsDown(WM_KEYDOWN) && vk == VK_ESCAPE && CtrlHeld())
+        if (IsDown(WM_KEYDOWN) && vk == VK_ESCAPE && CtrlHeld() && !ShiftHeld())
         {
             return true;
         }
@@ -148,4 +150,20 @@ public sealed class KeyboardGuardService : IDisposable
 
     private static bool AltHeld() => (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
     private static bool CtrlHeld() => (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    private static bool ShiftHeld() => (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+
+    private bool IsAllowedExternalForeground()
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(foreground, out var processId);
+        return processId != Environment.ProcessId
+            && Volatile.Read(ref _allowedExternalWindows).Contains(foreground);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 }

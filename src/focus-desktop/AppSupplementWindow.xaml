@@ -1,0 +1,45 @@
+<Window x:Class="focus_desktop.AppSupplementWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:focus_desktop"
+        Title="补充指定软件" Width="860" Height="660" MinWidth="700" MinHeight="540"
+        WindowStartupLocation="CenterScreen" Background="#23262C" Foreground="#F0F4FF"
+        ResizeMode="CanResize" ShowInTaskbar="True" UseLayoutRounding="True">
+    <Grid Margin="26">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+            <TextBlock Text="旧配置的一次性补充" FontSize="23" FontWeight="Bold"/>
+            <TextBlock Text="选择专注期间可使用的软件，或明确跳过并继续原来的专注模式。确认后名单会冻结。"
+                       FontSize="13" Foreground="#9AA0A6" TextWrapping="Wrap" Margin="0,7,0,0"/>
+        </StackPanel>
+
+        <local:ExternalAppSelectionControl x:Name="AppPicker" Grid.Row="1"/>
+
+        <TextBlock x:Name="SaveError" Grid.Row="2" Visibility="Collapsed" Margin="0,10,0,0"
+                   FontSize="12" TextWrapping="Wrap" Foreground="#E5534B"/>
+
+        <Grid Grid.Row="3" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button Content="取消并退出" Padding="14,8" MinHeight="38" HorizontalAlignment="Left"
+                    Background="#30353D" Foreground="#F0F4FF" BorderBrush="#545D6A" BorderThickness="1"
+                    Click="Cancel_Click" AutomationProperties.AutomationId="ExternalAppsCancelButton"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button x:Name="SkipButton" Content="跳过，不添加软件" Padding="14,8" MinHeight="38" Margin="0,0,10,0"
+                        Background="#30353D" Foreground="#F0F4FF" BorderBrush="#545D6A" BorderThickness="1"
+                        Click="Skip_Click" IsEnabled="False" AutomationProperties.AutomationId="ExternalAppsSkipButton"/>
+                <Button x:Name="SaveButton" Content="保存名单并继续" Padding="16,8" MinHeight="38" IsEnabled="False"
+                        Background="#F1C44A" Foreground="#25282D" BorderBrush="#F1C44A" BorderThickness="1"
+                        FontWeight="SemiBold" Click="Save_Click" AutomationProperties.AutomationId="ExternalAppsSaveButton"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

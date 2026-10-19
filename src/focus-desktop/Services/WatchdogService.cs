@@ -9,8 +9,7 @@ namespace focus_desktop.Services;
 /// 看门狗（Umbra watchdog 模式的轻量移植）：
 /// Enter() 时通过同一二进制的硬链接名启动 focus-desktop-watchdog.exe --watchdog &lt;pid&gt;，
 /// 它每 2 秒检查主进程存活 + 脏标志：
-///   - 主进程死了且 focus_mode_active=true，立即恢复任务栏；确认恢复后清标志（覆盖 taskkill /f、
-///     崩溃且异常处理器没跑成等一切"进程消失"场景），然后自行退出
+///   - 主进程死了且 focus_mode_active=true，立即恢复任务栏；还要核对 AppBar 窗口和工作区，确认后才清标志
 ///   - 脏标志=false（正常退出已恢复），自行退出
 /// 主进程 Exit()/Recover() 时主动杀掉 watchdog。
 /// 不是常驻 daemon：只在 focus session 期间存在，与主进程同生命周期。
@@ -22,6 +21,7 @@ public static class WatchdogService
 
     private static Process? _watchdog;
     private static readonly string WatchdogPath = Path.Combine(AppContext.BaseDirectory, $"{ProcessName}.exe");
+    public static string WatchdogExecutablePath => WatchdogPath;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -143,20 +143,34 @@ public static class WatchdogService
                     {
                         var restored = false;
                         try { restored = TaskbarService.Show(); } catch { }
-                        if (restored)
+                        var confirmed = false;
+                        var recoveryReason = "恢复探针失败";
+                        try { confirmed = RecoveryService.TryConfirmRecovery(
+                            restored, parentPid, expectedStartTicks, out recoveryReason); } catch { }
+                        var markerCleaned = false;
+                        Exception? markerWriteFailure = null;
+                        if (confirmed)
                         {
-                            try { RecoveryService.MarkClean(); } catch { }
+                            try
+                            {
+                                RecoveryService.MarkClean();
+                                markerCleaned = true;
+                            }
+                            catch (Exception ex) { markerWriteFailure = ex; }
                         }
                         try
                         {
                             CrashReporter.Write(
                                 new InvalidOperationException(
-                                    restored
-                                        ? $"主进程(pid={parentPid})非正常退出，watchdog 已恢复任务栏并清除脏标志"
-                                        : $"主进程(pid={parentPid})非正常退出，watchdog 未确认任务栏恢复，保留脏标志"),
-                                "watchdog-recovered");
+                                    markerCleaned
+                                        ? $"主进程(pid={parentPid})非正常退出，watchdog 已确认恢复并清除脏标志：{recoveryReason}"
+                                        : confirmed
+                                            ? $"主进程(pid={parentPid})非正常退出，恢复条件已确认但标记写入失败，保留脏标志：{recoveryReason}；{markerWriteFailure?.Message}"
+                                            : $"主进程(pid={parentPid})非正常退出，恢复未完全确认，保留脏标志：{recoveryReason}"),
+                                markerCleaned ? "watchdog-recovered" : "watchdog-recovery-incomplete");
                         }
                         catch { }
+                        if (flag && !markerCleaned) return 1;
                     }
                     return 0; // 使命完成（或无事发生），退出
                 }

@@ -34,3 +34,7 @@
 - **WebView2 Runtime**（Microsoft，随 Windows 分发）— 网页渲染。
 - **PDF 查看器**：V1 使用 WebView2 内置 PDF 查看能力，未捆绑 PDF.js；若后续切换，将在本文件补充 Apache-2.0 NOTICE。
 
+## Dock
+
+Dock 使用 Windows 自带的 AppBar、Shell 和应用激活 API；本功能没有新增第三方源代码或 NuGet 依赖。
+

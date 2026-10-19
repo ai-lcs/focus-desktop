@@ -15,7 +15,7 @@ using ColorConverter = System.Windows.Media.ColorConverter;
 namespace focus_desktop;
 
 /// <summary>
-/// Public v1 首次安装配置向导（3 步 + 底部导航）。
+/// Public v1 首次安装配置向导（4 步 + 底部导航）。
 /// 独立普通 Window，由 App 在启动时单独显示；MainWindow 仅在预览或完成后显示（不进锁定）。
 /// 全程 GUI：草稿在内存，只有「完成并开始使用」才原子写 config.json；
 /// setup_done.flag 留给首页「开始专注」按钮，表示登录准备完成并允许进入锁定；
@@ -50,6 +50,11 @@ public partial class SetupWizard : Window
         _draft = draft;
         _main = main;
         InitializeComponent();
+        ExternalAppsPicker.IsReadyChanged += ready =>
+        {
+            if (_step == 4) PrimaryButton.IsEnabled = ready;
+        };
+        _ = ExternalAppsPicker.InitializeAsync();
         InitDraftValues();
         BuildPresetCards();
         RefreshCustomList();
@@ -242,14 +247,17 @@ public partial class SetupWizard : Window
         Step1Panel.Visibility = step == 1 ? Visibility.Visible : Visibility.Collapsed;
         Step2Panel.Visibility = step == 2 ? Visibility.Visible : Visibility.Collapsed;
         Step3Panel.Visibility = step == 3 ? Visibility.Visible : Visibility.Collapsed;
+        Step4Panel.Visibility = step == 4 ? Visibility.Visible : Visibility.Collapsed;
 
         UpdateStepIndicator(Step1Indicator, step == 1);
         UpdateStepIndicator(Step2Indicator, step == 2);
         UpdateStepIndicator(Step3Indicator, step == 3);
+        UpdateStepIndicator(Step4Indicator, step == 4);
 
         BackButton.IsEnabled = step > 1;
         BackButton.Opacity = step > 1 ? 1.0 : 0.4;
-        PrimaryButton.Content = step == 3 ? "完成并开始使用" : "下一步";
+        PrimaryButton.Content = step == 4 ? "完成并开始使用" : "下一步";
+        PrimaryButton.IsEnabled = step != 4 || ExternalAppsPicker.IsReady;
     }
 
     private void UpdateStepIndicator(TextBlock tb, bool active)
@@ -269,7 +277,8 @@ public partial class SetupWizard : Window
         {
             case 1: if (ValidateStep1()) GoToStep(2); break;
             case 2: if (ValidateStep2()) GoToStep(3); break;
-            case 3: if (ValidateStep3()) CommitAndFinish(); break; // v1.0.2：背景步骤已移除，专注设置即末步（校验仍生效）
+            case 3: if (ValidateStep3()) GoToStep(4); break;
+            case 4: CommitAndFinish(); break;
         }
     }
 
@@ -535,6 +544,14 @@ public partial class SetupWizard : Window
 
     private void CommitAndFinish()
     {
+        if (!ExternalAppsPicker.IsReady)
+        {
+            ExternalAppsError.Text = "应用入口仍在扫描或解析，请等待完成后再确认。";
+            ExternalAppsError.Visibility = Visibility.Visible;
+            GoToStep(4);
+            return;
+        }
+
         var folder = FolderBox.Text.Trim();
         try
         {
@@ -560,6 +577,8 @@ public partial class SetupWizard : Window
             PomodoroCyclesUntilLong = _pomodoro.Cycles,
             BackgroundImage = null, // v1.0.2 背景图功能已移除（用户指示）：字段保留兼容旧 config 读取，不再写入
             Sites = new List<SiteCatalog.SiteEntry>(),
+            ExternalAppsConfirmed = true,
+            ExternalApps = ExternalAppsPicker.GetSelectedEntries(),
         };
         // 勾选的 preset（只存 id，域名真相在代码）+ 自定义条目（草稿里已含全字段）
         foreach (var id in SiteCatalog.DefaultPresetIds)
@@ -574,7 +593,17 @@ public partial class SetupWizard : Window
         final.Whitelist = wl;
         final.LoginDomains = ld;
 
-        final.Save();                   // 原子写 config.json（中途退出永不落盘）
+        try
+        {
+            final.Save();               // 外部应用名单与首次配置在同一原子 config.json 替换中提交
+        }
+        catch (Exception ex)
+        {
+            ExternalAppsError.Text = $"保存配置失败，尚未开始使用。请重试：{ex.Message}";
+            ExternalAppsError.Visibility = Visibility.Visible;
+            GoToStep(4);
+            return;
+        }
         // setup_done.flag 留到登录准备完成后由首页「开始专注」写入；
         // configured=true 只表示配置已冻结，重启仍应停留在未锁定的登录引导态。
         _completed = true;
@@ -585,6 +614,7 @@ public partial class SetupWizard : Window
     /// <summary>未完成就关闭（Alt+F4 / 进程退出前窗口被关）→ 不写 config，直接结束应用（幂等重进）。</summary>
     protected override void OnClosed(EventArgs e)
     {
+        ExternalAppsPicker.CancelPendingOperations();
         if (!_completed)
         {
             try { Application.Current.Shutdown(); } catch { }
