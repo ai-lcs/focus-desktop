@@ -226,6 +226,10 @@ function Restore-ShortcutSnapshot($State) {
             if ((Get-FileHash -LiteralPath $item.Backup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.Sha256) {
                 throw "A preserved shortcut backup failed its SHA-256 check: $($item.Backup)"
             }
+            if ((Test-Path -LiteralPath $item.Path -PathType Leaf) -and
+                (Get-FileHash -LiteralPath $item.Path -Algorithm SHA256).Hash.ToLowerInvariant() -eq $item.Sha256) {
+                continue
+            }
             $parent = Split-Path -Parent $item.Path
             $null = New-Item -ItemType Directory -Path $parent -Force
             Copy-Item -LiteralPath $item.Backup -Destination $item.Path -Force
