@@ -260,7 +260,7 @@ function Write-State($State) {
     $temporary = $statePath + ".tmp"
     [IO.File]::WriteAllText($temporary, $json, [Text.UTF8Encoding]::new($false))
     if (Test-Path -LiteralPath $statePath -PathType Leaf) {
-        [IO.File]::Replace($temporary, $statePath, $null, $true)
+        [IO.File]::Replace($temporary, $statePath, [NullString]::Value, $true)
     } else {
         [IO.File]::Move($temporary, $statePath)
     }
@@ -434,7 +434,7 @@ if ($Action -eq "Install") {
             throw "Offline evidence copy did not match the original profile. The original has not been moved."
         }
         if (Test-Path -LiteralPath $originalBackupPath) { throw "Offline backup sibling already exists; refusing to move user data." }
-        Move-Item -LiteralPath $dataPath -Destination $originalBackupPath
+        [IO.Directory]::Move($dataPath, $originalBackupPath)
         $state.ProfileMoved = $true
         $state.Status = "ProfileIsolated"
         Write-State $state
@@ -615,6 +615,11 @@ switch ($Action) {
             if (Test-Path -LiteralPath $testProfileEvidence) { throw "Test-profile evidence destination already exists; refusing to overwrite it." }
             $null = New-Item -ItemType Directory -Path (Split-Path -Parent $testProfileEvidence) -Force
             Move-Item -LiteralPath $dataPath -Destination (Split-Path -Parent $testProfileEvidence)
+        } elseif ($state.OriginalProfileExisted) {
+            $currentOriginal = Get-TreeFingerprint $dataPath
+            if (-not $currentOriginal.Exists -or $currentOriginal.Hash -ne $state.OriginalProfileFingerprint.Hash) {
+                throw "Original profile has no verified offline backup and is not unchanged at its original path; refusing to mark Restore complete."
+            }
         }
 
         Restore-ShortcutSnapshot $state
