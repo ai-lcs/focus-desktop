@@ -20,7 +20,12 @@ public partial class App : Application
             StartChild();
 
         for (var i = 1; i <= _options.WindowCount; i++)
-            new FixtureWindow(_options, i).Show();
+        {
+            var window = new FixtureWindow(_options, i);
+            window.Show();
+            if (_options.ActivateAfterShowDelayMilliseconds > 0)
+                _ = window.ActivateAfterDelayAsync(_options.ActivateAfterShowDelayMilliseconds);
+        }
     }
 
     private void StartChild()
@@ -52,7 +57,8 @@ internal sealed record FixtureOptions(
     int? OwnerProcessId,
     bool IsChild,
     bool SpawnChild,
-    bool StartMinimized)
+    bool StartMinimized,
+    int ActivateAfterShowDelayMilliseconds)
 {
     public static FixtureOptions Parse(string[] args)
     {
@@ -78,13 +84,14 @@ internal sealed record FixtureOptions(
                               Path.Combine(Path.GetTempPath(), "Focus Desk Dock Test Fixture");
         var windowCount = GetInt(values, "--fixture-window-count", 1, 1, 5);
         var delay = GetInt(values, "--fixture-start-delay-ms", 0, 0, 60000);
+        var activateDelay = GetInt(values, "--fixture-activate-after-show-delay-ms", 0, 0, 60000);
         int? ownerPid = int.TryParse(Get(values, "--fixture-owner-pid"), out var parsedOwner) ? parsedOwner : null;
         var isChild = flags.Contains("--fixture-child");
         var spawnChild = flags.Contains("--fixture-spawn-child") && !isChild;
 
         Directory.CreateDirectory(reportDirectory);
         return new FixtureOptions(reportDirectory, windowCount, delay, ownerPid, isChild, spawnChild,
-            flags.Contains("--fixture-start-minimized"));
+            flags.Contains("--fixture-start-minimized"), activateDelay);
     }
 
     private static string? Get(Dictionary<string, string> values, string key) =>

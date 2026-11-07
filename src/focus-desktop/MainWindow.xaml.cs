@@ -1466,11 +1466,12 @@ public partial class MainWindow : Window
         if (msg == WmQueryPrepareUninstall)
         {
             handled = true;
-            return new IntPtr(1);
+            return _options.Preview || _firstRunWizardPending ? IntPtr.Zero : new IntPtr(1);
         }
         if (msg == WmPrepareUninstall)
         {
             handled = true;
+            if (_options.Preview || _firstRunWizardPending) return IntPtr.Zero;
             try { _focus.ExitIfActive(); } catch { }
             _recoveryExitDone = true;
             Application.Current.Shutdown();

@@ -42,7 +42,7 @@ public partial class ExternalAppSelectionControl : WpfUserControl
         {
             var scan = await ExternalAppCatalog.ScanDesktopAsync();
             if (!_isActive) return;
-            foreach (var entry in scan.Entries) AddEntry(entry);
+            foreach (var entry in scan.Entries) AddEntry(entry, out _);
             ShowErrors(scan.Errors.Select(error => $"{Path.GetFileName(error.Path)}：{error.Message}"));
             UpdateCount();
         }
@@ -103,7 +103,10 @@ public partial class ExternalAppSelectionControl : WpfUserControl
                 {
                     var entry = await ExternalAppCatalog.ResolveAsync(path);
                     if (!_isActive) return;
-                    if (!AddEntry(entry)) errors.Add($"{Path.GetFileName(path)}：这个入口已在列表中。");
+                    if (!AddEntry(entry, out var identityConflict))
+                        errors.Add(identityConflict ?? $"{Path.GetFileName(path)}：这个入口已在列表中。");
+                    else if (identityConflict != null)
+                        errors.Add(identityConflict);
                 }
                 catch (Exception ex)
                 {
@@ -127,10 +130,21 @@ public partial class ExternalAppSelectionControl : WpfUserControl
         }
     }
 
-    private bool AddEntry(ExternalAppEntry entry)
+    private bool AddEntry(ExternalAppEntry entry, out string? identityConflict)
     {
-        if (_choices.Any(choice => string.Equals(choice.Entry.Id, entry.Id, StringComparison.OrdinalIgnoreCase)))
+        var sameDefinition = _choices.FirstOrDefault(choice =>
+            string.Equals(choice.Entry.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
+        if (sameDefinition != null)
+        {
+            identityConflict = ExternalAppEntry.DescribeWindowMatchIdentityConflict(sameDefinition.Entry, entry);
             return false;
+        }
+
+        var existingIdentity = ExternalAppEntry.FindWindowMatchIdentityConflict(
+            _choices.Select(choice => choice.Entry), entry);
+        identityConflict = existingIdentity == null
+            ? null
+            : ExternalAppEntry.DescribeWindowMatchIdentityConflict(existingIdentity, entry);
 
         var choice = new Choice(entry);
         _choices.Add(choice);
@@ -162,7 +176,20 @@ public partial class ExternalAppSelectionControl : WpfUserControl
             Cursor = System.Windows.Input.Cursors.Hand,
         };
         System.Windows.Automation.AutomationProperties.SetAutomationId(check, $"ExternalApp_{choice.Entry.Id}");
-        check.Checked += (_, _) => { choice.IsSelected = true; UpdateCount(); };
+        check.Checked += (_, _) =>
+        {
+            var selectedConflict = ExternalAppEntry.FindWindowMatchIdentityConflict(
+                _choices.Where(other => other.IsSelected).Select(other => other.Entry), choice.Entry);
+            if (selectedConflict != null)
+            {
+                choice.IsSelected = false;
+                check.IsChecked = false;
+                ShowErrors(new[] { ExternalAppEntry.DescribeWindowMatchIdentityConflict(selectedConflict, choice.Entry) });
+                return;
+            }
+            choice.IsSelected = true;
+            UpdateCount();
+        };
         check.Unchecked += (_, _) => { choice.IsSelected = false; UpdateCount(); };
 
         var icon = new WpfImage
@@ -185,15 +212,22 @@ public partial class ExternalAppSelectionControl : WpfUserControl
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
         var identity = choice.Entry.AppUserModelId ?? choice.Entry.ExecutablePath ?? choice.Entry.ShortcutPath ?? "";
+        var kindLabel = choice.Entry.Kind == ExternalAppEntry.PackagedAppKind ? "打包应用" : "桌面应用";
+        var launchArguments = string.IsNullOrWhiteSpace(choice.Entry.Arguments) ? "默认" : choice.Entry.Arguments;
+        var workingDirectory = choice.Entry.Kind == ExternalAppEntry.PackagedAppKind
+            ? "打包应用默认"
+            : string.IsNullOrWhiteSpace(choice.Entry.WorkingDirectory)
+                ? Path.GetDirectoryName(choice.Entry.ExecutablePath ?? "") ?? "未指定"
+                : choice.Entry.WorkingDirectory;
         var detailText = new TextBlock
         {
-            Text = choice.Entry.Kind == ExternalAppEntry.PackagedAppKind ? "打包应用" : "桌面应用",
+            Text = $"{kindLabel} · 参数：{launchArguments}",
             FontSize = 11,
             Foreground = new SolidColorBrush(WpfColor.FromRgb(154, 160, 166)),
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         details.Children.Add(detailText);
-        details.ToolTip = identity;
+        details.ToolTip = $"身份：{identity}{Environment.NewLine}启动参数：{launchArguments}{Environment.NewLine}工作目录：{workingDirectory}";
         Grid.SetColumn(details, 2);
 
         var remove = new WpfButton

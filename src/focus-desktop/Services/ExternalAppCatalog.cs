@@ -152,13 +152,17 @@ public static class ExternalAppCatalog
                 continue;
             }
 
-            foreach (var shortcut in shortcuts)
+            foreach (var shortcut in shortcuts.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     var entry = ResolveShortcut(shortcut);
-                    entries.TryAdd(entry.Id, entry);
+                    if (!TryAddScannedEntry(entries, entry, out var identityConflict)) continue;
+                    if (identityConflict != null)
+                        errors.Add(new ExternalAppScanError(
+                            shortcut,
+                            identityConflict));
                 }
                 catch (Exception ex)
                 {
@@ -173,6 +177,23 @@ public static class ExternalAppCatalog
             .ToList();
         for (var i = 0; i < ordered.Count; i++) ordered[i].Order = i;
         return new ExternalAppScanResult(ordered, errors);
+    }
+
+    internal static bool TryAddScannedEntry(
+        IDictionary<string, ExternalAppEntry> entries,
+        ExternalAppEntry candidate,
+        out string? identityConflictMessage)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(candidate);
+        identityConflictMessage = null;
+        if (entries.ContainsKey(candidate.Id)) return false;
+
+        var conflict = ExternalAppEntry.FindWindowMatchIdentityConflict(entries.Values, candidate);
+        if (conflict != null)
+            identityConflictMessage = ExternalAppEntry.DescribeWindowMatchIdentityConflict(conflict, candidate);
+        entries.Add(candidate.Id, candidate);
+        return true;
     }
 
     private static Task<T> RunOnStaAsync<T>(Func<T> operation, CancellationToken cancellationToken, string threadName)

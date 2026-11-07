@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 
 namespace FocusDesk.DockTestFixture;
@@ -13,6 +15,7 @@ internal sealed class FixtureWindow : Window
     private readonly FixtureOptions _options;
     private readonly int _windowIndex;
     private readonly TextBox _draftBox;
+    private readonly string _eventLogFile;
     private bool _isDirty = true;
 
     public FixtureWindow(FixtureOptions options, int windowIndex)
@@ -51,6 +54,8 @@ internal sealed class FixtureWindow : Window
 
         var reportFile = Path.Combine(_options.ReportDirectory,
             $"fixture-{process.Id}-window-{windowIndex}.json");
+        _eventLogFile = Path.Combine(_options.ReportDirectory,
+            $"fixture-{process.Id}-window-{windowIndex}-events.jsonl");
         var saveFile = Path.Combine(_options.ReportDirectory,
             $"saved-{process.Id}-window-{windowIndex}.txt");
         var report = new FixtureReport(
@@ -97,7 +102,59 @@ internal sealed class FixtureWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = root
         };
+        SourceInitialized += (_, _) => RecordEvent("SourceInitialized");
+        Loaded += (_, _) => RecordEvent("Loaded");
+        ContentRendered += (_, _) => RecordEvent("ContentRendered");
+        Activated += (_, _) => RecordEvent("Activated");
+        Deactivated += (_, _) => RecordEvent("Deactivated");
+        IsVisibleChanged += (_, _) => RecordEvent("IsVisibleChanged");
+        StateChanged += (_, _) => RecordEvent("StateChanged");
+        Closed += (_, _) => RecordEvent("Closed");
+        RecordEvent("Constructed");
         Closing += OnClosing;
+    }
+
+    public async Task ActivateAfterDelayAsync(int delayMilliseconds)
+    {
+        await Task.Delay(delayMilliseconds).ConfigureAwait(false);
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!IsVisible)
+            {
+                RecordEvent("DelayedActivateSkippedNotVisible");
+                return;
+            }
+
+            RecordEvent("DelayedActivateRequested");
+            var activated = Activate();
+            RecordEvent(activated ? "DelayedActivateReturnedTrue" : "DelayedActivateReturnedFalse");
+        }));
+    }
+
+    private void RecordEvent(string eventName)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var foreground = GetForegroundWindow();
+        _ = GetWindowThreadProcessId(foreground, out var foregroundProcessId);
+        var observation = new FixtureWindowEvent(
+            DateTimeOffset.UtcNow,
+            eventName,
+            hwnd.ToInt64(),
+            foreground.ToInt64(),
+            foregroundProcessId,
+            IsVisible,
+            IsActive,
+            WindowState == WindowState.Minimized);
+
+        try
+        {
+            File.AppendAllText(_eventLogFile,
+                JsonSerializer.Serialize(observation) + Environment.NewLine);
+        }
+        catch
+        {
+            // Event logging is diagnostic; it must not alter the fixture's window behavior.
+        }
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -120,6 +177,12 @@ internal sealed class FixtureWindow : Window
         _isDirty = false;
         Dispatcher.BeginInvoke(new Action(Close));
     }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 }
 
 internal sealed record FixtureReport(
@@ -130,6 +193,16 @@ internal sealed record FixtureReport(
     string[] Arguments,
     string WindowTitle,
     DateTimeOffset StartedAtUtc);
+
+internal sealed record FixtureWindowEvent(
+    DateTimeOffset TimestampUtc,
+    string Event,
+    long WindowHandle,
+    long ForegroundWindow,
+    uint ForegroundProcessId,
+    bool IsVisible,
+    bool IsActive,
+    bool IsMinimized);
 
 internal enum SaveChoice
 {

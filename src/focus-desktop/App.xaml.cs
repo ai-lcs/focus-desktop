@@ -13,8 +13,8 @@ namespace focus_desktop;
 
 public partial class App : System.Windows.Application
 {
-    private Mutex? _singleInstanceMutex;
-    private bool _ownsSingleInstanceMutex;
+    private DesktopSessionLease? _desktopSessionLease;
+    private ProfileUsageLease? _profileUsageLease;
     private AppOptions _options = null!;
     private FocusModeService _focus = null!;
 
@@ -25,6 +25,14 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         _options = AppOptions.Parse(e.Args);
+
+        // This check runs as the original interactive user, rather than the elevated installer account.
+        if (e.Args.Contains("--first-run-if-needed", StringComparer.OrdinalIgnoreCase)
+            && Directory.Exists(Paths.DataDir))
+        {
+            Shutdown();
+            return;
+        }
 
         // The isolated Dock self-test owns its unobserved-task handler and must run before app handlers.
         if (_options.DockSelfTest)
@@ -38,19 +46,23 @@ public partial class App : System.Windows.Application
         // This must run before the singleton check so an existing instance can receive the shutdown request.
         if (e.Args.Contains("--prepare-uninstall"))
         {
-            Environment.Exit(PrepareForUninstall());
+            Environment.Exit(PrepareForUninstall(e.Args.Contains("--remove-user-data", StringComparer.OrdinalIgnoreCase)));
             return;
         }
 
         WireGlobalExceptionHandlers();
 
-        // --watchdog <pid> [startTicks]：看门狗伴生进程模式（无 UI，Run到主进程消失）
-        if (e.Args.Length >= 2 && e.Args[0] == "--watchdog" && int.TryParse(e.Args[1], out var parentPid))
+        // Watchdog recovery is bound to one parent identity and session generation.
+        if (e.Args.Length > 0 && e.Args[0] == "--watchdog")
         {
-            long? parentStartTicks = null;
-            if (e.Args.Length >= 3 && long.TryParse(e.Args[2], out var parsedStartTicks))
-                parentStartTicks = parsedStartTicks;
-            Environment.Exit(WatchdogService.RunLoop(parentPid, parentStartTicks));
+            if (e.Args.Length != 4 || !int.TryParse(e.Args[1], out var parentPid) || parentPid <= 0
+                || !long.TryParse(e.Args[2], out var parentStartTicks) || parentStartTicks <= 0
+                || !Guid.TryParseExact(e.Args[3], "N", out _))
+            {
+                Environment.Exit(2);
+                return;
+            }
+            Environment.Exit(WatchdogService.RunLoop(parentPid, parentStartTicks, e.Args[3]));
             return;
         }
 
@@ -84,33 +96,52 @@ public partial class App : System.Windows.Application
         // --restore：纯恢复模式。不进 UI，恢复完就退。
         if (_options.Restore)
         {
-            var restored = TaskbarService.Show();
-            var liveMain = HasSamePathWindowProcess(Environment.ProcessPath);
-            var recoveryConfirmed = false;
-            var recoveryReason = "主进程仍在运行";
-            if (restored && !liveMain)
-                recoveryConfirmed = RecoveryService.TryConfirmRecovery(restored, null, null, out recoveryReason);
-            if (recoveryConfirmed) RecoveryService.MarkClean();
-            var message = liveMain
-                ? "任务栏已恢复。检测到同路径 Focus Desk 窗口仍在运行；键盘钩子状态未知，因此没有清除恢复标记。请在任务管理器中结束该 Focus Desk 主进程后再运行 --restore。"
-                : restored
-                    ? recoveryConfirmed
-                        ? $"任务栏已恢复；未发现仍运行的 Focus Desk 主窗口，AppBar 恢复状态已确认并清除恢复标记。\n\n{recoveryReason}"
-                        : $"任务栏已恢复，但 AppBar/显示器工作区状态未能确认；恢复标记已保留。请恢复原显示器工作区并关闭占用同一边缘的其他桌面栏后重试 --restore。\n\n{recoveryReason}"
-                    : "未能确认任务栏恢复，恢复标记已保留。请稍后重试 --restore。";
+            if (!DesktopSessionCoordinator.TryAcquire(out var restoreLease, out var ownershipReason))
+            {
+                WpfMessageBox.Show(ownershipReason, "Focus Desk 恢复未执行", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+                Environment.Exit(1);
+                return;
+            }
+            using var desktopLease = restoreLease;
+            if (!ProfileUsageLease.TryAcquire(Paths.DataDir, out var profileLease, out ownershipReason))
+            {
+                WpfMessageBox.Show(ownershipReason, "Focus Desk 恢复未执行", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+                Environment.Exit(1);
+                return;
+            }
+            using var restoreProfileLease = profileLease;
+            if (!RecoveryService.TryGetRecoverableSession(out var recoverySession, out var recoveryReason))
+            {
+                WpfMessageBox.Show(recoveryReason, "Focus Desk 恢复未执行", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+                Shutdown(1);
+                return;
+            }
+            var restored = recoverySession is null || TaskbarService.Show();
+            var recoveryConfirmed = RecoveryService.TryConfirmRecovery(restored, recoverySession, out recoveryReason);
+            if (recoveryConfirmed) recoveryConfirmed = RecoveryService.TryMarkCleanIfCurrent(recoverySession);
+            var message = recoverySession is null
+                ? "没有待恢复的 Focus Desk 会话，本次未修改桌面。"
+                : recoveryConfirmed
+                    ? "任务栏与 AppBar 恢复已确认，已清除本次会话的恢复标记。"
+                    : $"恢复未能全部确认，标记已保留。请先正常退出其他 Focus Desk 实例，检查任务栏与显示器工作区后再重试 --restore。\n\n{recoveryReason}";
             WpfMessageBox.Show(message, "Focus Desk 恢复",
+                WpfMessageBoxButton.OK, WpfMessageBoxImage.Information);
+            Shutdown(recoveryConfirmed ? 0 : 1);
+            return;
+        }
+
+        // 单实例：防止双击两次造成双重钩子/双重隐藏的混乱状态
+        if (!DesktopSessionCoordinator.TryAcquire(out _desktopSessionLease, out var sessionReason))
+        {
+            WpfMessageBox.Show(sessionReason, "focus-desktop",
                 WpfMessageBoxButton.OK, WpfMessageBoxImage.Information);
             Shutdown();
             return;
         }
 
-        // 单实例：防止双击两次造成双重钩子/双重隐藏的混乱状态
-        _singleInstanceMutex = new Mutex(true, "focus-desktop-single-instance", out var createdNew);
-        _ownsSingleInstanceMutex = createdNew;
-        if (!_ownsSingleInstanceMutex)
+        if (!ProfileUsageLease.TryAcquire(Paths.DataDir, out _profileUsageLease, out var profileReason))
         {
-            WpfMessageBox.Show("focus-desktop 已在运行。", "focus-desktop",
-                WpfMessageBoxButton.OK, WpfMessageBoxImage.Information);
+            WpfMessageBox.Show(profileReason, "Focus Desk 配置正在使用", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
             Shutdown();
             return;
         }
@@ -136,6 +167,14 @@ public partial class App : System.Windows.Application
 
         // 配置：新安装写入 configured:false，避免默认白名单被误判为 legacy。
         var settings = AppSettings.LoadOrDefault(out var configStatus);
+        if (configStatus == AppSettings.ConfigLoadStatus.LegacyIdentityConflict)
+        {
+            WpfMessageBox.Show(
+                $"旧版应用名单含有同一应用的多个启动定义，新版无法将它们区分为独立窗口入口。配置和网页登录数据均未修改，本次不会进入专注。\n\n{Paths.ConfigFile}\n\n请先备份该配置文件，在程序退出后仅调整 externalApps：每个 exe 或 AUMID 保留一个需要的入口，保留该入口的完整 ID、参数与工作目录。其他配置和 WebViewProfile 无需删除。重新启动前请核对备份。",
+                "Focus Desk 旧版名单需要确认", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            Shutdown();
+            return;
+        }
         if (configStatus == AppSettings.ConfigLoadStatus.Corrupt)
         {
             WpfMessageBox.Show(
@@ -276,19 +315,14 @@ public partial class App : System.Windows.Application
             try { _focus.ExitIfActive(); }
             catch (Exception ex) { CrashReporter.Write(ex, "on-exit"); }
 
-            try { TaskbarService.Show(); }
-            catch (Exception ex) { CrashReporter.Write(ex, "on-exit-taskbar"); }
         }
 
-        if (_ownsSingleInstanceMutex)
-        {
-            try { _singleInstanceMutex?.ReleaseMutex(); } catch { }
-        }
-        _singleInstanceMutex?.Dispose();
+        _profileUsageLease?.Dispose();
+        _desktopSessionLease?.Dispose();
         base.OnExit(e);
     }
 
-    private static int PrepareForUninstall()
+    private static int PrepareForUninstall(bool removeUserData)
     {
         var executablePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executablePath)) return 1;
@@ -303,17 +337,8 @@ public partial class App : System.Windows.Application
                     PostMessage(hwnd, focus_desktop.MainWindow.WmPrepareUninstall, IntPtr.Zero, IntPtr.Zero);
                 if (process.WaitForExit(2500)) continue;
 
-                // A timed-out process is killed only after an exact-path check and a fresh
-                // query confirms that this HWND still belongs to our MainWindow.
-                if (!IsSameExecutable(process, executablePath)
-                    || !IsFocusDeskMainWindow(hwnd)) continue;
-
-                try
-                {
-                    process.Kill(entireProcessTree: false);
-                    process.WaitForExit(1500);
-                }
-                catch { }
+                // A non-responsive or drafting instance must be left intact.
+                return 1;
             }
         }
 
@@ -321,7 +346,18 @@ public partial class App : System.Windows.Application
                 Environment.ProcessId, TimeSpan.FromSeconds(5)))
             return 1;
 
-        if (!TaskbarService.Show()) return 1;
+        if (!DesktopSessionCoordinator.TryAcquire(out var desktopLease, out _)) return 1;
+        using var ownedDesktop = desktopLease;
+        if (!ProfileUsageLease.TryAcquire(Paths.DataDir, out var profileLease, out _)) return 1;
+        using var ownedProfile = profileLease;
+
+        if (RecoveryService.WasActiveLastTime())
+        {
+            if (!RecoveryService.TryGetRecoverableSession(out var recoverySession, out _)) return 1;
+            var restored = TaskbarService.Show();
+            if (!RecoveryService.TryConfirmRecovery(restored, recoverySession, out _)
+                || !RecoveryService.TryMarkCleanIfCurrent(recoverySession)) return 1;
+        }
         var webViewProfile = Path.GetFullPath(Path.Combine(Paths.DataDir, "WebViewProfile"));
         if (!WaitForNoProfileWebViewProcesses(webViewProfile, TimeSpan.FromSeconds(15)))
         {
@@ -331,7 +367,28 @@ public partial class App : System.Windows.Application
         }
         // Only the exiting main process can confirm that its AppBar and keyboard hooks
         // were released. Taskbar visibility alone is not enough to clear its marker.
-        return RecoveryService.WasActiveLastTime() ? 1 : 0;
+        if (RecoveryService.WasActiveLastTime()) return 1;
+        if (!removeUserData) return 0;
+        if (!UninstallDataPolicy.CanRemoveUserData(Paths.DataDir, out var cleanupReason))
+        {
+            Console.Error.WriteLine(cleanupReason);
+            return 1;
+        }
+        try
+        {
+            // Both guards remain held until deletion finishes; Inno must never delete this later.
+            Directory.Delete(Paths.DataDir, recursive: true);
+            return 0;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"用户数据清理未完成，可能已部分清除（{ex.GetType().Name}）；卸载应中止。");
+            return 2;
+        }
     }
 
     private static bool HasSamePathWindowProcess(string? executablePath)

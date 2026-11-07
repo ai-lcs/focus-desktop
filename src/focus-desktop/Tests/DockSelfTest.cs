@@ -55,6 +55,9 @@ public static class DockSelfTest
         {
             Directory.CreateDirectory(temporaryDirectory);
             CheckNativeProcessIdentity(Check);
+            Check("Dock installed profile is isolated from the legacy profile",
+                Paths.InstalledDataDirectoryName == "focus-desktop-dock");
+            CheckFullScreenLayout(Check);
             CheckIdentityMatching(Check);
             Task.Run(() =>
             {
@@ -64,6 +67,7 @@ public static class DockSelfTest
             CheckRecoveryGate(Check);
             CheckWebViewProfileMatching(Check, temporaryDirectory);
             CheckSettingsAndAtomicSave(Check, CheckExpectedWriteFailure, temporaryDirectory);
+            ExternalAppIdentitySelfTest.Run(Check);
         }
         catch (Exception ex)
         {
@@ -88,12 +92,36 @@ public static class DockSelfTest
         return failed == 0 ? 0 : 1;
     }
 
+    private static void CheckFullScreenLayout(Action<string, bool> check)
+    {
+        // Reproduce the screenshot: hidden taskbar still reserves the bottom 96 px
+        // on a 2560x1600, 200% desktop. Also check other physical screen/DPI sizes.
+        foreach (var (width, height, dockWidth, taskbarHeight) in new[]
+        {
+            (2560, 1600, 192, 96), (1920, 1080, 96, 48), (1920, 1200, 144, 72),
+        })
+        {
+            var monitor = new DesktopRect(0, 0, width, height);
+            var approved = new DesktopRect(0, 0, dockWidth, height - taskbarHeight);
+            var work = new DesktopRect(dockWidth, 0, width, height - taskbarHeight);
+            var full = AppBarWindowService.CalculateLayout(approved, monitor, work, true);
+            check($"full-screen Dock reaches bottom at {width}x{height}/{dockWidth}",
+                full.ApprovedBounds == new DesktopRect(0, 0, dockWidth, height));
+            check($"full-screen content and Dock cover screen without gap or overlap at {width}x{height}/{dockWidth}",
+                full.WorkArea == new DesktopRect(dockWidth, 0, width, height)
+                && full.ApprovedBounds.Right == full.WorkArea.Left);
+            var development = AppBarWindowService.CalculateLayout(approved, monitor, work, false);
+            check($"development mode preserves Shell work area at {width}x{height}/{dockWidth}",
+                development == new AppBarLayout(approved, work));
+        }
+    }
+
     private static void CheckNativeProcessIdentity(Action<string, bool> check)
     {
         var nativeMethod = typeof(ExternalAppWindowService).GetMethod(
             "OpenProcess", BindingFlags.NonPublic | BindingFlags.Static);
         var import = nativeMethod?.GetCustomAttribute<DllImportAttribute>();
-        var importedMethods = new[] { typeof(ExternalAppWindowService), typeof(AppBarWindowService) }
+        var importedMethods = new[] { typeof(ExternalAppWindowService), typeof(AppBarWindowService), typeof(DockWindow) }
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly))
             .Where(method => (method.Attributes & MethodAttributes.PinvokeImpl) != 0)
             .ToList();

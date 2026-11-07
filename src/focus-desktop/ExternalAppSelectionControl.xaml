@@ -19,7 +19,7 @@
 
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
             <TextBlock Text="选择专注期间可使用的软件" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppText}"/>
-            <TextBlock Text="名单外的软件不会出现在 Dock。你可以留空；勾选和浏览只修改本次配置草稿。"
+            <TextBlock Text="名单外的软件不会出现在 Dock。已有应用窗口优先复用；参数和工作目录只用于没有可用窗口时启动，不保证打开指定项目、浏览器配置或文档实例。同一应用身份只能勾选一个入口。你可以留空；勾选和浏览只修改本次配置草稿。"
                        Margin="0,6,0,0" FontSize="13" TextWrapping="Wrap" Foreground="{StaticResource AppMuted}"/>
         </StackPanel>
 

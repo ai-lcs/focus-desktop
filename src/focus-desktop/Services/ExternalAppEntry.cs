@@ -119,6 +119,80 @@ public sealed class ExternalAppEntry
             appUserModelId.ToUpperInvariant(), arguments ?? "", working.ToUpperInvariant()));
     }
 
+    public bool HasSameWindowMatchIdentity(ExternalAppEntry? other)
+    {
+        if (other == null) return false;
+        if (Kind == PackagedAppKind || other.Kind == PackagedAppKind)
+            return Kind == PackagedAppKind
+                && other.Kind == PackagedAppKind
+                && string.Equals(AppUserModelId, other.AppUserModelId, StringComparison.OrdinalIgnoreCase);
+
+        if (!IsWin32Kind(Kind) || !IsWin32Kind(other.Kind)
+            || string.IsNullOrWhiteSpace(ExecutablePath)
+            || string.IsNullOrWhiteSpace(other.ExecutablePath))
+            return false;
+
+        return SameNormalizedPath(ExecutablePath, other.ExecutablePath);
+    }
+
+    public static ExternalAppEntry? FindWindowMatchIdentityConflict(
+        IEnumerable<ExternalAppEntry> entries,
+        ExternalAppEntry candidate)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(candidate);
+        return entries.FirstOrDefault(entry => entry.HasSameWindowMatchIdentity(candidate));
+    }
+
+    public static string DescribeWindowMatchIdentityConflict(ExternalAppEntry existing, ExternalAppEntry candidate)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (string.Equals(existing.Id, candidate.Id, StringComparison.OrdinalIgnoreCase))
+            return $"“{candidate.DisplayName}”与“{existing.DisplayName}”是同一应用入口，已在候选列表中。";
+
+        var differentLaunchDefinition = !string.Equals(existing.Arguments ?? "", candidate.Arguments ?? "", StringComparison.Ordinal)
+            || !SameLaunchWorkingDirectory(existing, candidate);
+        return differentLaunchDefinition
+            ? $"“{candidate.DisplayName}”与“{existing.DisplayName}”指向同一应用身份，但启动参数或工作目录不同。已有窗口按应用身份优先复用，无法区分项目或配置实例；请选择一个启动定义。"
+            : $"“{candidate.DisplayName}”与“{existing.DisplayName}”指向同一应用身份；只能选择一个入口。";
+    }
+
+    private static bool IsWin32Kind(string kind) => kind is ShellLinkKind or ExecutableKind;
+
+    private static bool SameLaunchWorkingDirectory(ExternalAppEntry first, ExternalAppEntry second)
+    {
+        if (first.Kind == PackagedAppKind || second.Kind == PackagedAppKind)
+            return SameOptionalPath(first.WorkingDirectory, second.WorkingDirectory);
+
+        var firstWorking = string.IsNullOrWhiteSpace(first.WorkingDirectory)
+            ? Path.GetDirectoryName(Path.GetFullPath(first.ExecutablePath!))
+            : first.WorkingDirectory;
+        var secondWorking = string.IsNullOrWhiteSpace(second.WorkingDirectory)
+            ? Path.GetDirectoryName(Path.GetFullPath(second.ExecutablePath!))
+            : second.WorkingDirectory;
+        return SameOptionalPath(firstWorking, secondWorking);
+    }
+
+    private static bool SameOptionalPath(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second))
+            return string.IsNullOrWhiteSpace(first) && string.IsNullOrWhiteSpace(second);
+        return SameNormalizedPath(first, second);
+    }
+
+    private static bool SameNormalizedPath(string first, string second)
+    {
+        try
+        {
+            return string.Equals(NormalizePath(first), NormalizePath(second), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
     private static string NormalizePath(string path) => Path.GetFullPath(path.Trim());
 
     private static string ComposeIdentity(params string[] fields)

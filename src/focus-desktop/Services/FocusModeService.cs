@@ -9,7 +9,7 @@ public sealed class FocusModeService
     private DockWindow? _dock;
     private bool _registerAppBarWhenActive;
     private bool _dockReleaseConfirmed = true;
-    private bool _sessionStartedByThisInstance;
+    private string? _sessionGeneration;
 
     public bool IsActive { get; private set; }
     public bool HasRecoveryResponsibility => IsActive || _dock != null || RecoveryService.WasActiveLastTime();
@@ -57,6 +57,8 @@ public sealed class FocusModeService
     public void Enter()
     {
         if (IsActive) return;
+        if (!DesktopSessionCoordinator.IsHeldByCurrentThread)
+            throw new InvalidOperationException("当前线程未持有 Focus Desk 会话协调锁，不能进入专注模式。");
         try
         {
             MonitorWorkAreaSnapshot? originalMonitor = null;
@@ -67,10 +69,11 @@ public sealed class FocusModeService
                 originalMonitor = snapshot;
             }
 
-            RecoveryService.MarkActive(originalMonitor);
-            _sessionStartedByThisInstance = true;
-            WatchdogService.Launch();
-            TaskbarService.Hide();
+            var generation = RecoveryService.MarkActive(originalMonitor);
+            _sessionGeneration = generation;
+            WatchdogService.Launch(generation);
+            if (!TaskbarService.Hide())
+                throw new InvalidOperationException("任务栏隐藏操作未能确认，已取消专注模式。");
             _keyboard.Install();
             if (!StartDock(_registerAppBarWhenActive))
                 throw new InvalidOperationException("Dock 无法注册为 Windows 桌面栏，已回滚专注模式。");
@@ -89,10 +92,12 @@ public sealed class FocusModeService
         IsActive = false;
         _keyboard.Uninstall();
         var dockReleased = ReleaseDock();
-        var taskbarRestored = TaskbarService.Show();
-        if (dockReleased && taskbarRestored && RecoveryService.WasActiveLastTime())
-            dockReleased = RecoveryService.TryConfirmOwnedAppBarReleased(out _);
-        CompleteRecovery(taskbarRestored, dockReleased, "focus-exit-recovery-uncertain");
+        var sessionReadable = RecoveryService.TryGetRecoverableSession(out var session, out _);
+        var taskbarRestored = sessionReadable && TaskbarService.Show();
+        var recoveryConfirmed = taskbarRestored
+            && RecoveryService.TryConfirmRecovery(taskbarRestored, session, out _);
+        CompleteRecovery(taskbarRestored && recoveryConfirmed, dockReleased, session,
+            "focus-exit-recovery-uncertain");
     }
 
     public void Recover()
@@ -101,24 +106,17 @@ public sealed class FocusModeService
         try { _keyboard.Uninstall(); } catch { }
         var hasOwnedDock = _dock != null;
         var dockReleased = hasOwnedDock ? ReleaseDock() : _dockReleaseConfirmed;
+        var sessionReadable = RecoveryService.TryGetRecoverableSession(out var session, out _);
         var taskbarRestored = false;
-        try { taskbarRestored = TaskbarService.Show(); } catch { }
-        if (taskbarRestored && RecoveryService.WasActiveLastTime())
+        try { taskbarRestored = sessionReadable && TaskbarService.Show(); } catch { }
+        var recoveryConfirmed = taskbarRestored
+            && RecoveryService.TryConfirmRecovery(taskbarRestored, session, out _);
+        try
         {
-            if (_sessionStartedByThisInstance || hasOwnedDock)
-            {
-                // This instance owns the marker and has closed its Dock. Verify registered AppBar
-                // geometry after Taskbar.Show; an initialization failure before registration is
-                // covered by the local no-AppBar state.
-                var locallyReleased = hasOwnedDock ? dockReleased : _dockReleaseConfirmed;
-                dockReleased = locallyReleased && RecoveryService.TryConfirmOwnedAppBarReleased(out _);
-            }
-            else if (!hasOwnedDock)
-            {
-                try { dockReleased = RecoveryService.TryConfirmAppBarReleased(null, null, out _); } catch { }
-            }
+            CompleteRecovery(taskbarRestored && recoveryConfirmed, dockReleased, session,
+                "focus-recovery-uncertain");
         }
-        try { CompleteRecovery(taskbarRestored, dockReleased, "focus-recovery-uncertain"); } catch { }
+        catch { }
     }
 
     public void ExitIfActive()
@@ -139,7 +137,8 @@ public sealed class FocusModeService
         try
         {
             if (registerAppBar) _mainWindow.PrepareForAppBarDock();
-            var dock = new DockWindow(_mainWindow, this, _dockEntries, _keyboard);
+            var dock = new DockWindow(_mainWindow, this, _dockEntries, _keyboard,
+                fullScreen: _sessionGeneration != null);
             _dock = dock;
             _dockReleaseConfirmed = false;
             if (!dock.TryShowDock(registerAppBar)) return false;
@@ -173,12 +172,13 @@ public sealed class FocusModeService
         return _dockReleaseConfirmed;
     }
 
-    private void CompleteRecovery(bool taskbarRestored, bool dockReleased, string source)
+    private void CompleteRecovery(bool taskbarRestored, bool dockReleased,
+        RecoverySessionSnapshot? session, string source)
     {
-        if (CanMarkRecoveryClean(taskbarRestored, dockReleased))
+        if (CanMarkRecoveryClean(taskbarRestored, dockReleased)
+            && RecoveryService.TryMarkCleanIfCurrent(session))
         {
-            RecoveryService.MarkClean();
-            _sessionStartedByThisInstance = false;
+            _sessionGeneration = null;
             WatchdogService.Stop();
             return;
         }

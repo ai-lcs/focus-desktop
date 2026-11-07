@@ -10,7 +10,7 @@ namespace focus_desktop.Services;
 /// </summary>
 public class AppSettings
 {
-    public enum ConfigLoadStatus { Missing, Valid, Corrupt }
+    public enum ConfigLoadStatus { Missing, Valid, LegacyIdentityConflict, Corrupt }
 
     [JsonPropertyName("studyFolder")]
     public string StudyFolder { get; set; } =
@@ -94,6 +94,9 @@ public class AppSettings
 
     /// <summary>检查外部应用配置的三态与结构。运行时文件存在性由启动服务处理。</summary>
     public bool TryValidateExternalApps(out string? error)
+        => TryValidateExternalApps(allowWindowIdentityConflicts: false, out error);
+
+    private bool TryValidateExternalApps(bool allowWindowIdentityConflicts, out string? error)
     {
         error = null;
         if (ExternalAppsConfirmed == null && ExternalApps == null)
@@ -107,6 +110,7 @@ public class AppSettings
 
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var orders = new HashSet<int>();
+        var validEntries = new List<ExternalAppEntry>();
         foreach (var entry in ExternalApps)
         {
             if (entry == null)
@@ -126,9 +130,32 @@ public class AppSettings
                 error = "外部应用名单中有重复的顺序号。";
                 return false;
             }
+
+            var identityConflict = ExternalAppEntry.FindWindowMatchIdentityConflict(validEntries, entry);
+            if (identityConflict != null && !allowWindowIdentityConflicts)
+            {
+                error = ExternalAppEntry.DescribeWindowMatchIdentityConflict(identityConflict, entry);
+                return false;
+            }
+            validEntries.Add(entry);
         }
 
         return true;
+    }
+
+    public string? GetExternalAppIdentityConflictMessage()
+    {
+        if (ExternalApps == null) return null;
+        var validEntries = new List<ExternalAppEntry>();
+        foreach (var entry in ExternalApps)
+        {
+            if (entry == null) continue;
+            var conflict = ExternalAppEntry.FindWindowMatchIdentityConflict(validEntries, entry);
+            if (conflict != null)
+                return ExternalAppEntry.DescribeWindowMatchIdentityConflict(conflict, entry);
+            validEntries.Add(entry);
+        }
+        return null;
     }
 
     /// <summary>legacy v1 配置（有实质旧字段但无 schemaVersion）。升级后应保持原有行为。</summary>
@@ -155,9 +182,11 @@ public class AppSettings
             // JSON 语法正确但关键集合被显式写成 null，同样不能当作可运行配置。
             if (cfg != null && cfg.Whitelist != null && cfg.LoginDomains != null
                 && cfg.StudyFolder != null && cfg.ExitPhrase != null && cfg.FocusQuote != null
-                && cfg.TryValidateExternalApps(out _))
+                && cfg.TryValidateExternalApps(allowWindowIdentityConflicts: true, out _))
             {
-                status = ConfigLoadStatus.Valid;
+                status = cfg.TryValidateExternalApps(out _)
+                    ? ConfigLoadStatus.Valid
+                    : ConfigLoadStatus.LegacyIdentityConflict;
                 return cfg;
             }
         }

@@ -9,11 +9,11 @@ namespace focus_desktop.Services;
 /// 看门狗（Umbra watchdog 模式的轻量移植）：
 /// Enter() 时通过同一二进制的硬链接名启动 focus-desktop-watchdog.exe --watchdog &lt;pid&gt;，
 /// 它每 2 秒检查主进程存活 + 脏标志：
-///   - 主进程死了且 focus_mode_active=true，立即恢复任务栏；还要核对 AppBar 窗口和工作区，确认后才清标志
+///   - 主进程死了且会话 generation 仍匹配，取得桌面及配置目录协调权后才恢复
 ///   - 脏标志=false（正常退出已恢复），自行退出
 /// 主进程 Exit()/Recover() 时主动杀掉 watchdog。
 /// 不是常驻 daemon：只在 focus session 期间存在，与主进程同生命周期。
-/// watchdog 自己被杀/失败，退化到原有恢复链（启动自愈 + --restore + explorer 兜底）。
+/// watchdog 自己失败时，恢复标记保留，由启动自愈或手动恢复接手。
 /// </summary>
 public static class WatchdogService
 {
@@ -27,24 +27,19 @@ public static class WatchdogService
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateHardLink(string newFileName, string existingFileName, IntPtr securityAttributes);
 
-    public static void Launch()
+    public static void Launch(string sessionGeneration)
     {
         try
         {
             var exe = Environment.ProcessPath;
-            if (string.IsNullOrEmpty(exe)) return;
-            var parentIdentity = "";
-            try
-            {
-                using var current = Process.GetCurrentProcess();
-                parentIdentity = $" {current.StartTime.ToUniversalTime().Ticks}";
-            }
-            catch { }
+            if (string.IsNullOrEmpty(exe) || string.IsNullOrWhiteSpace(sessionGeneration)) return;
+            using var current = Process.GetCurrentProcess();
+            var parentStartTicks = current.StartTime.ToUniversalTime().Ticks;
             var watchdogExe = PrepareWatchdogExecutable(exe);
             var psi = new ProcessStartInfo
             {
                 FileName = watchdogExe,
-                Arguments = $"--watchdog {Environment.ProcessId}{parentIdentity}",
+                Arguments = $"--watchdog {current.Id} {parentStartTicks} {sessionGeneration}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = AppContext.BaseDirectory,
@@ -107,10 +102,13 @@ public static class WatchdogService
     }
 
     /// <summary>--watchdog 参数的进程侧主循环。返回进程退出码。</summary>
-    public static int RunLoop(int parentPid, long? expectedStartTicks = null)
+    public static int RunLoop(int parentPid, long expectedStartTicks, string expectedGeneration)
     {
         try
         {
+            if (parentPid <= 0 || expectedStartTicks <= 0 || string.IsNullOrWhiteSpace(expectedGeneration))
+                return 1;
+
             for (; ; )
             {
                 Thread.Sleep(2000);
@@ -120,11 +118,11 @@ public static class WatchdogService
                 {
                     using var parent = Process.GetProcessById(parentPid);
                     parentAlive = !parent.HasExited;
-                    if (parentAlive && expectedStartTicks.HasValue)
+                    if (parentAlive)
                     {
                         try
                         {
-                            parentAlive = parent.StartTime.ToUniversalTime().Ticks == expectedStartTicks.Value;
+                            parentAlive = parent.StartTime.ToUniversalTime().Ticks == expectedStartTicks;
                         }
                         catch
                         {
@@ -138,39 +136,51 @@ public static class WatchdogService
 
                 if (!parentAlive)
                 {
-                    // 主进程消失：脏标志还在，我们是最后一个能恢复系统的
+                    // 主进程消失：恢复前先取得两个协调锁，再逐次核对 generation 和进程身份。
                     if (flag)
                     {
-                        var restored = false;
-                        try { restored = TaskbarService.Show(); } catch { }
-                        var confirmed = false;
-                        var recoveryReason = "恢复探针失败";
-                        try { confirmed = RecoveryService.TryConfirmRecovery(
-                            restored, parentPid, expectedStartTicks, out recoveryReason); } catch { }
-                        var markerCleaned = false;
-                        Exception? markerWriteFailure = null;
-                        if (confirmed)
+                        if (!DesktopSessionCoordinator.TryAcquire(out var desktopLease, out _)) return 1;
+                        using (desktopLease!)
                         {
-                            try
+                            if (!ProfileUsageLease.TryAcquire(Paths.DataDir, out var profileLease, out _))
+                                return 1;
+                            using (profileLease!)
                             {
-                                RecoveryService.MarkClean();
-                                markerCleaned = true;
+                                var recoveryReason = "会话 generation、主进程身份或恢复状态已变化";
+                                var markerCleaned = DesktopSessionRecoveryProtocol.TryRunWatchdogRecovery(
+                                    () => RecoveryService.TryGetRecoverableSession(out var session, out _)
+                                        ? session
+                                        : null,
+                                    expectedGeneration,
+                                    parentPid,
+                                    expectedStartTicks,
+                                    RecoveryService.IsProcessIdentityExited,
+                                    () =>
+                                    {
+                                        var restored = TaskbarService.Show();
+                                        if (!restored) recoveryReason = "任务栏恢复未确认";
+                                        return restored;
+                                    },
+                                    session => RecoveryService.TryConfirmAppBarReleased(
+                                        session.ParentProcessId, session.ParentStartTicks, out recoveryReason),
+                                    session =>
+                                    {
+                                        var clean = RecoveryService.TryMarkCleanIfCurrent(session);
+                                        if (!clean) recoveryReason = "会话身份在清理恢复标记前发生变化";
+                                        return clean;
+                                    });
+                                try
+                                {
+                                    CrashReporter.Write(
+                                        new InvalidOperationException(markerCleaned
+                                            ? $"主进程(pid={parentPid})非正常退出；watchdog 已取得会话协调权并确认恢复：{recoveryReason}"
+                                            : $"主进程(pid={parentPid})非正常退出；watchdog 未确认当前会话恢复，保留恢复标记：{recoveryReason}"),
+                                        markerCleaned ? "watchdog-recovered" : "watchdog-recovery-incomplete");
+                                }
+                                catch { }
+                                return markerCleaned ? 0 : 1;
                             }
-                            catch (Exception ex) { markerWriteFailure = ex; }
                         }
-                        try
-                        {
-                            CrashReporter.Write(
-                                new InvalidOperationException(
-                                    markerCleaned
-                                        ? $"主进程(pid={parentPid})非正常退出，watchdog 已确认恢复并清除脏标志：{recoveryReason}"
-                                        : confirmed
-                                            ? $"主进程(pid={parentPid})非正常退出，恢复条件已确认但标记写入失败，保留脏标志：{recoveryReason}；{markerWriteFailure?.Message}"
-                                            : $"主进程(pid={parentPid})非正常退出，恢复未完全确认，保留脏标志：{recoveryReason}"),
-                                markerCleaned ? "watchdog-recovered" : "watchdog-recovery-incomplete");
-                        }
-                        catch { }
-                        if (flag && !markerCleaned) return 1;
                     }
                     return 0; // 使命完成（或无事发生），退出
                 }

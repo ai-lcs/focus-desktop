@@ -1,5 +1,35 @@
 # 测试说明
 
+## 本轮稳定性测试
+
+新版 Dock 安装身份、默认安装目录和安装版数据路径已经独立于旧版；旧安装隔离脚本仍含历史 AppId 假设，禁止用于本轮宿主机验收。
+
+`RuntimeFlow` 在自己的构建目录创建 portable.flag、合成 profile 和可丢弃全屏软件窗口，运行两个本地 WebView、文件页/首页与外部窗口往返，检查草稿、Cookie、页面实例、计时/Hard Focus 及热键注册释放。默认不操作任务栏或注册 AppBar/键盘钩子。结果不能代替真实鼠标、第三方软件或安装验收。它会显示测试窗口，仅在独立测试环境运行：
+
+```powershell
+dotnet run --project tests/RuntimeFlow
+```
+
+`-- --hotkey-only` 仅运行热键占用、冲突拒绝和释放检查。`-- --formal` 会短暂隐藏任务栏、注册真实 AppBar/键盘钩子，并使用生产恢复与看门狗，检查窗口原生矩形、正常退出及工作区恢复。仅在允许短暂接管桌面的独立测试会话使用；不要与其他 Focus Desk 或此测试并行运行。
+
+`-- --formal --observe` 另外等待 60 秒，供 Computer Use 或人工在测试窗口按 Ctrl+Alt+F10，并要求实际收到原生 WM_HOTKEY 且恢复主界面/Dock；未送达也判失败。此模式不是无人工输入的自测。测试最长 120 秒超时退出，看门狗负责正式模式异常恢复。
+
+## 1.2.1 修复候选的边界
+
+本轮仅处理新版。旧版安装、便携目录、快捷方式、真实 LocalAppData 数据和同 AppId 注册项只读核对，禁止在宿主机运行下面历史安装隔离流程移动真实数据。Setup 的 CURRENTUSER 和默认管理员矩阵使用一次性环境，见 [INSTALLER_TEST_ISOLATION.md](INSTALLER_TEST_ISOLATION.md)。没有安全隔离环境时记为阻断，不算通过或发布正式 Latest。
+
+新增的独立逻辑验证：
+
+```powershell
+dotnet run --project tests/ProfileLeaseProbe/ProfileLeaseProbe.csproj
+dotnet run --project tests/DesktopSession/DesktopSession.Tests.csproj
+powershell -File tests/verify-uninstall-data-policy.ps1
+```
+
+ProfileLeaseProbe 只在随机临时目录中创建合成文件，验证跨进程互斥、大小写、独立 profile，以及实际删除期间仍拒绝另一实例。DesktopSession 使用独立随机命名 mutex，不触碰任务栏；卸载策略矩阵调用生产身份判据，不读取真实 profile。这些用例不能替代真实桌面或最终 Setup 验收。
+
+最终包的 GUI/恢复证据必须记录运行 exe 的 SHA-256。真实 Dock 点击需要受支持的鼠标输入与有效截图；Button.RaiseEvent、UIA Invoke、纯逻辑测试单独记录。普通非最小化迟到窗口应记录夹具 Show/Activated 时间与前台变化，区分产品回调和应用自行激活；保留旧最小化场景。
+
 本目录里的旧验收脚本并非都适合在当前机器直接运行。运行前先读脚本并确认它写入、清理和启动的确切路径。本文只记录当前可用的隔离准备工具；此时新增 Dock 的包级安装、桌面往返和恢复验收尚未完成，不代表测试通过。
 
 ## 旧脚本风险

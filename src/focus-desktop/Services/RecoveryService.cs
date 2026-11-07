@@ -22,20 +22,25 @@ public static class RecoveryService
         [property: JsonPropertyName("work_left")] int? WorkLeft = null,
         [property: JsonPropertyName("work_top")] int? WorkTop = null,
         [property: JsonPropertyName("work_right")] int? WorkRight = null,
-        [property: JsonPropertyName("work_bottom")] int? WorkBottom = null);
+        [property: JsonPropertyName("work_bottom")] int? WorkBottom = null,
+        [property: JsonPropertyName("session_generation")] string? SessionGeneration = null);
 
-    internal static void MarkActive(MonitorWorkAreaSnapshot? originalMonitor = null)
+    internal static string MarkActive(MonitorWorkAreaSnapshot? originalMonitor = null)
     {
         if (WasActiveLastTime())
             throw new InvalidOperationException("上次会话的恢复状态仍未确认，不能覆盖原恢复记录。");
 
-        TryGetCurrentProcessIdentity(out var processId, out var startTicks);
+        if (!TryGetCurrentProcessIdentity(out var processId, out var startTicks))
+            throw new InvalidOperationException("无法取得 Focus Desk 主进程身份，不能创建恢复记录。");
+        var generation = Guid.NewGuid().ToString("N");
         Paths.EnsureDirectories();
         AtomicFile.WriteAllText(Paths.SessionStateFile,
             JsonSerializer.Serialize(CreateState(true, appBarExpected: false,
-                processId: processId == 0 ? null : processId,
-                startTicks: startTicks == 0 ? null : startTicks,
-                originalMonitor: originalMonitor)));
+                processId: processId,
+                startTicks: startTicks,
+                originalMonitor: originalMonitor,
+                sessionGeneration: generation)));
+        return generation;
     }
 
     internal static bool TryRecordAppBarCandidate(IntPtr hwnd, MonitorWorkAreaSnapshot currentMonitor)
@@ -71,7 +76,8 @@ public static class RecoveryService
                     hwnd,
                     processId,
                     startTicks,
-                    monitorSnapshot)));
+                    monitorSnapshot,
+                    state?.SessionGeneration ?? Guid.NewGuid().ToString("N"))));
             return true;
         }
         catch
@@ -80,11 +86,120 @@ public static class RecoveryService
         }
     }
 
-    public static void MarkClean()
+    /// <summary>Validates the recorded owner before a recovery path mutates the interactive desktop.</summary>
+    /// <remarks>Markers from c0d6660 with complete PID/start-time data remain recoverable without a generation.</remarks>
+    public static bool TryGetRecoverableSession(out RecoverySessionSnapshot? session, out string reason)
     {
+        session = null;
+        if (!WasActiveLastTime())
+        {
+            reason = "没有待恢复会话";
+            return true;
+        }
+
+        var state = ReadState();
+        if (state?.FocusModeActive != true)
+        {
+            reason = "恢复记录不可读或内容无效";
+            return false;
+        }
+
+        var hasParentIdentity = state.ParentPid.HasValue || state.ParentStartTicks.HasValue;
+        var hasNewMetadata = HasNewRecoveryMetadata(state) || state.SessionGeneration != null;
+        if (hasParentIdentity || state.SessionGeneration != null)
+        {
+            if (state.ParentPid is not int parentPid
+                || state.ParentStartTicks is not long parentStartTicks)
+            {
+                reason = "恢复记录包含不完整的主进程身份";
+                return false;
+            }
+
+            if (state.SessionGeneration != null && string.IsNullOrWhiteSpace(state.SessionGeneration))
+            {
+                reason = "恢复记录包含无效的 session generation";
+                return false;
+            }
+
+            var isCurrentOwner = TryGetCurrentProcessIdentity(out var currentPid, out var currentStartTicks)
+                && parentPid == currentPid && parentStartTicks == currentStartTicks;
+            if (!isCurrentOwner && !IsProcessIdentityExited(parentPid, parentStartTicks))
+            {
+                reason = "恢复记录中的主进程仍存活，或其身份无法核验";
+                return false;
+            }
+        }
+        else if (hasNewMetadata)
+        {
+            reason = "旧版恢复记录包含部分新版元数据，拒绝在所有权不明时更改桌面";
+            return false;
+        }
+
+        if (state.AppBarExpected == true
+            && (state.AppBarHwnd is null || ReadSnapshot(state) is null))
+        {
+            reason = "恢复记录的 AppBar 元数据不完整";
+            return false;
+        }
+        if (state.AppBarExpected == false && hasParentIdentity
+            && !CanConfirmNoAppBarRecovery(state.AppBarHwnd.HasValue,
+                state.ParentPid is int && state.ParentStartTicks is long))
+        {
+            reason = "恢复记录声明无 AppBar，但身份或 HWND 字段不一致";
+            return false;
+        }
+
+        session = ToSnapshot(state);
+        reason = "恢复记录及主进程身份已核验";
+        return true;
+    }
+
+    /// <summary>Rechecks the exact marker read before taskbar restoration, then verifies AppBar release.</summary>
+    public static bool TryConfirmRecovery(bool taskbarRestored, RecoverySessionSnapshot? expectedSession,
+        out string reason)
+    {
+        if (!taskbarRestored)
+        {
+            reason = "任务栏恢复未确认";
+            return false;
+        }
+
+        if (expectedSession == null)
+        {
+            reason = "没有待恢复会话";
+            return !WasActiveLastTime();
+        }
+
+        if (!MatchesCurrentSession(expectedSession))
+        {
+            reason = "会话 generation 或主进程身份在恢复期间发生变化";
+            return false;
+        }
+
+        var isCurrentOwner = TryGetCurrentProcessIdentity(out var currentPid, out var currentStartTicks)
+            && expectedSession.ParentProcessId == currentPid
+            && expectedSession.ParentStartTicks == currentStartTicks;
+        var confirmed = isCurrentOwner
+            ? TryConfirmOwnedAppBarReleased(out reason)
+            : TryConfirmAppBarReleased(expectedSession.ParentProcessId,
+                expectedSession.ParentStartTicks, out reason);
+        return confirmed && MatchesCurrentSession(expectedSession);
+    }
+
+    /// <summary>Conditionally clears only the active marker whose identity was just confirmed.</summary>
+    public static bool TryMarkCleanIfCurrent(RecoverySessionSnapshot? expectedSession)
+    {
+        if (!DesktopSessionCoordinator.IsHeldByCurrentThread) return false;
+        if (expectedSession == null) return !WasActiveLastTime();
+
+        var current = ReadState();
+        if (!Matches(current, expectedSession)) return false;
+
         Paths.EnsureDirectories();
         AtomicFile.WriteAllText(Paths.SessionStateFile,
-            JsonSerializer.Serialize(CreateState(false, appBarExpected: false)));
+            JsonSerializer.Serialize(CreateState(false, appBarExpected: false,
+                sessionGeneration: current!.SessionGeneration)));
+        return true;
     }
 
     public static bool WasActiveLastTime()
@@ -104,23 +219,6 @@ public static class RecoveryService
             // 状态损坏/不可读时保守恢复；不能据此清除恢复标志。
             return true;
         }
-    }
-
-    /// <summary>Legacy marker files have no AppBar fields and retain their taskbar-only recovery behavior.</summary>
-    public static bool TryConfirmRecovery(bool taskbarRestored, int? expectedParentPid,
-        long? expectedParentStartTicks, out string reason)
-    {
-        if (!taskbarRestored)
-        {
-            reason = "任务栏恢复未确认";
-            return false;
-        }
-
-        if (!TryConfirmAppBarReleased(expectedParentPid, expectedParentStartTicks, out reason))
-            return false;
-
-        reason = "任务栏与 AppBar 恢复均已确认";
-        return true;
     }
 
     public static bool TryConfirmAppBarReleased(int? expectedParentPid, long? expectedParentStartTicks,
@@ -286,7 +384,7 @@ public static class RecoveryService
 
     private static SessionState CreateState(bool focusModeActive, bool appBarExpected,
         IntPtr hwnd = default, int? processId = null, long? startTicks = null,
-        MonitorWorkAreaSnapshot? originalMonitor = null)
+        MonitorWorkAreaSnapshot? originalMonitor = null, string? sessionGeneration = null)
     {
         var snapshot = originalMonitor;
         return new SessionState(
@@ -303,8 +401,21 @@ public static class RecoveryService
             snapshot?.WorkArea.Left,
             snapshot?.WorkArea.Top,
             snapshot?.WorkArea.Right,
-            snapshot?.WorkArea.Bottom);
+            snapshot?.WorkArea.Bottom,
+            sessionGeneration);
     }
+
+    private static RecoverySessionSnapshot ToSnapshot(SessionState state) =>
+        new(state.FocusModeActive, state.SessionGeneration, state.ParentPid, state.ParentStartTicks);
+
+    private static bool MatchesCurrentSession(RecoverySessionSnapshot expected) =>
+        Matches(ReadState(), expected);
+
+    private static bool Matches(SessionState? state, RecoverySessionSnapshot expected) =>
+        state is { FocusModeActive: true }
+        && string.Equals(state.SessionGeneration, expected.Generation, StringComparison.Ordinal)
+        && state.ParentPid == expected.ParentProcessId
+        && state.ParentStartTicks == expected.ParentStartTicks;
 
     private static MonitorWorkAreaSnapshot? ReadSnapshot(SessionState state)
     {
@@ -350,7 +461,7 @@ public static class RecoveryService
         }
     }
 
-    private static bool IsProcessIdentityExited(int processId, long expectedStartTicks)
+    internal static bool IsProcessIdentityExited(int processId, long expectedStartTicks)
     {
         try
         {

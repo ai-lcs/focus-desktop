@@ -45,6 +45,7 @@ internal sealed class AppBarWindowService : IDisposable
     private static readonly IntPtr HwndBottom = new(1);
 
     private readonly Window _window;
+    private readonly bool _fullScreen;
     private readonly HwndSourceHook _hook;
     private HwndSource? _source;
     private IntPtr _hwnd;
@@ -62,9 +63,10 @@ internal sealed class AppBarWindowService : IDisposable
     public event Action<string>? RegistrationLost;
     public event Action<AppBarLayout?>? LayoutChanged;
 
-    public AppBarWindowService(Window window)
+    public AppBarWindowService(Window window, bool fullScreen)
     {
         _window = window;
+        _fullScreen = fullScreen;
         _hook = WndProc;
     }
 
@@ -243,32 +245,46 @@ internal sealed class AppBarWindowService : IDisposable
             || approved.Left < 0 || approved.Top < 0 || approved.Right > screenWidth || approved.Bottom > screenHeight)
             return false;
 
-        if (!SetWindowPos(_hwnd, HwndTopmost, approved.Left, approved.Top, width, height,
-                SwpNoActivate | SwpNoOwnerZOrder))
-            return false;
-
-        if (!GetWindowRect(_hwnd, out var actual)
-            || actual.Left != approved.Left
-            || actual.Top != approved.Top
-            || actual.Right != approved.Right
-            || actual.Bottom != approved.Bottom)
-            return false;
-
         var monitor = MonitorFromWindow(_hwnd, MonitorDefaultToNearest);
         var monitorInfo = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
         if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref monitorInfo)) return false;
 
-        var layout = new AppBarLayout(
+        var layout = CalculateLayout(
             new DesktopRect(approved.Left, approved.Top, approved.Right, approved.Bottom),
+            new DesktopRect(monitorInfo.Monitor.Left, monitorInfo.Monitor.Top,
+                monitorInfo.Monitor.Right, monitorInfo.Monitor.Bottom),
             new DesktopRect(monitorInfo.Work.Left, monitorInfo.Work.Top,
-                monitorInfo.Work.Right, monitorInfo.Work.Bottom));
+                monitorInfo.Work.Right, monitorInfo.Work.Bottom), _fullScreen);
+        var bounds = layout.ApprovedBounds;
         if (layout.WorkArea.Width <= 0 || layout.WorkArea.Height <= 0) return false;
+        if (!SetWindowPos(_hwnd, HwndTopmost, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
+                SwpNoActivate | SwpNoOwnerZOrder))
+            return false;
+
+        if (!GetWindowRect(_hwnd, out var actual)
+            || actual.Left != bounds.Left
+            || actual.Top != bounds.Top
+            || actual.Right != bounds.Right
+            || actual.Bottom != bounds.Bottom)
+            return false;
         if (Layout != layout)
         {
             Layout = layout;
             LayoutChanged?.Invoke(layout);
         }
         return true;
+    }
+
+    internal static AppBarLayout CalculateLayout(DesktopRect approved, DesktopRect monitor,
+        DesktopRect workArea, bool fullScreen)
+    {
+        // Hiding the taskbar leaves its Shell work-area reservation intact. Cover
+        // that strip locally without changing the global work area or other apps.
+        return fullScreen
+            ? new AppBarLayout(
+                new DesktopRect(approved.Left, monitor.Top, approved.Right, monitor.Bottom),
+                new DesktopRect(approved.Right, monitor.Top, monitor.Right, monitor.Bottom))
+            : new AppBarLayout(approved, workArea);
     }
 
     private IntPtr WndProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -283,6 +299,10 @@ internal sealed class AppBarWindowService : IDisposable
             else if (notification == AbnFullScreenApp)
             {
                 var fullscreenOpening = lParam != IntPtr.Zero;
+                GetWindowThreadProcessId(GetForegroundWindow(), out var foregroundProcessId);
+                // Our own borderless focus surface can also trigger this Shell
+                // notification. Returning home must not bury its own Dock.
+                if (foregroundProcessId == (uint)Environment.ProcessId) fullscreenOpening = false;
                 _window.Topmost = !fullscreenOpening;
                 if (!SetWindowPos(_hwnd, fullscreenOpening ? HwndBottom : HwndTopmost,
                         0, 0, 0, 0, SwpNoActivate | SwpNoOwnerZOrder | SwpNoMove | SwpNoSize))
@@ -411,6 +431,9 @@ internal sealed class AppBarWindowService : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);

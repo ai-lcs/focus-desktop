@@ -144,6 +144,7 @@ public sealed class ExternalAppWindowService : IDisposable
     private HashSet<IntPtr> _activeOwnerChain = new();
     private long _activeWindowRevision;
     private volatile bool _disposed;
+    private long _foregroundEventVersion;
 
     public ExternalAppWindowService(IReadOnlyList<ExternalAppEntry> entries, KeyboardGuardService keyboard)
     {
@@ -241,6 +242,7 @@ public sealed class ExternalAppWindowService : IDisposable
         try
         {
             var window = await Task.Run(() => FindWindow(entry), _lifetime.Token).ConfigureAwait(false);
+            if (!_intents.IsCurrent(intent)) return MakeResult(false, true, null, intent);
             if (window == IntPtr.Zero)
             {
                 var launchTask = _launches.GetOrStart(entry.Id, () => LaunchAndWaitAsync(entry, _lifetime.Token));
@@ -421,18 +423,35 @@ public sealed class ExternalAppWindowService : IDisposable
 
     private void OnWinEvent(IntPtr hook, uint eventType, IntPtr hwnd, int objectId, int childId, uint eventThread, uint eventTime)
     {
+        if (eventType == EventSystemForeground)
+        {
+            var version = Interlocked.Increment(ref _foregroundEventVersion);
+            // Process identities and Shell property stores can be slow. Never run
+            // them on the thread delivering window events (the WPF UI thread).
+            _ = Task.Run(() => ProcessWindowEvent(hook, eventType, hwnd, objectId, childId,
+                eventThread, eventTime, version));
+            return;
+        }
+        ProcessWindowEvent(hook, eventType, hwnd, objectId, childId, eventThread, eventTime, 0);
+    }
+
+    private void ProcessWindowEvent(IntPtr hook, uint eventType, IntPtr hwnd, int objectId,
+        int childId, uint eventThread, uint eventTime, long foregroundVersion)
+    {
         try
         {
-            HandleWinEvent(hook, eventType, hwnd, objectId, childId, eventThread, eventTime);
+            HandleWinEvent(hook, eventType, hwnd, objectId, childId, eventThread, eventTime, foregroundVersion);
         }
         catch (Exception ex)
         {
+            if (foregroundVersion != 0 && foregroundVersion != Volatile.Read(ref _foregroundEventVersion)) return;
             CrashReporter.Write(ex, "external-app-winevent");
             FailClosedAfterWinEventError();
         }
     }
 
-    private void HandleWinEvent(IntPtr hook, uint eventType, IntPtr hwnd, int objectId, int childId, uint eventThread, uint eventTime)
+    private void HandleWinEvent(IntPtr hook, uint eventType, IntPtr hwnd, int objectId, int childId, uint eventThread, uint eventTime,
+        long foregroundVersion)
     {
         if (_disposed || hwnd == IntPtr.Zero || objectId != ObjectIdWindow || childId != ChildIdSelf) return;
 
@@ -459,14 +478,17 @@ public sealed class ExternalAppWindowService : IDisposable
         }
 
         if (eventType != EventSystemForeground) return;
+        if (foregroundVersion != Volatile.Read(ref _foregroundEventVersion) || GetForegroundWindow() != hwnd) return;
+        var foregroundProcessCache = new Dictionary<uint, ExternalWindowIdentity>();
         foreach (var entry in _entries)
         {
-            var processCache = new Dictionary<uint, ExternalWindowIdentity>();
-            if (!TryGetOwnerChain(hwnd, entry, processCache, out var identities, out var handles)
+            if (!TryGetOwnerChain(hwnd, entry, foregroundProcessCache, out var identities, out var handles)
                 || !MatchesOwnerChain(entry, identities)) continue;
 
             lock (_windowStateGate)
             {
+                if (_disposed || foregroundVersion != Volatile.Read(ref _foregroundEventVersion)
+                    || GetForegroundWindow() != hwnd) return;
                 _recentWindows[entry.Id] = hwnd;
                 foreach (var handle in handles) _knownWindows.Add(handle);
                 _activeEntryId = entry.Id;
@@ -482,6 +504,8 @@ public sealed class ExternalAppWindowService : IDisposable
         var currentIntent = _intents.CurrentVersion;
         lock (_windowStateGate)
         {
+            if (_disposed || foregroundVersion != Volatile.Read(ref _foregroundEventVersion)
+                || GetForegroundWindow() != hwnd) return;
             previousEntry = _activeEntryId;
             previousRevision = _activeWindowRevision;
         }
