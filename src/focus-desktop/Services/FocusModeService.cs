@@ -10,6 +10,7 @@ public sealed class FocusModeService
     private bool _registerAppBarWhenActive;
     private bool _dockReleaseConfirmed = true;
     private string? _sessionGeneration;
+    private bool _entering;
 
     public bool IsActive { get; private set; }
     public bool HasRecoveryResponsibility => IsActive || _dock != null || RecoveryService.WasActiveLastTime();
@@ -54,11 +55,12 @@ public sealed class FocusModeService
     }
 
     /// <summary>Enters focus mode: preserve recovery marker until every owned system change is released.</summary>
-    public void Enter()
+    public async Task EnterAsync()
     {
-        if (IsActive) return;
+        if (IsActive || _entering) return;
         if (!DesktopSessionCoordinator.IsHeldByCurrentThread)
             throw new InvalidOperationException("当前线程未持有 Focus Desk 会话协调锁，不能进入专注模式。");
+        _entering = true;
         try
         {
             MonitorWorkAreaSnapshot? originalMonitor = null;
@@ -72,11 +74,24 @@ public sealed class FocusModeService
             var generation = RecoveryService.MarkActive(originalMonitor);
             _sessionGeneration = generation;
             WatchdogService.Launch(generation);
-            if (!TaskbarService.Hide())
+            if (_dockEntries.Count > 0 && _dock == null && _mainWindow != null)
+            {
+                _dock = new DockWindow(_mainWindow, this, _dockEntries, _keyboard, fullScreen: true);
+                _dockReleaseConfirmed = false;
+                await _dock.CaptureCurrentPlacementsAsync();
+                if (_sessionGeneration != generation) return;
+            }
+            if (!TaskbarService.Hide(releaseReservation: _dockEntries.Count > 0))
                 throw new InvalidOperationException("任务栏隐藏操作未能确认，已取消专注模式。");
+            if (_dockEntries.Count > 0) await Task.Delay(120);
+            if (_sessionGeneration != generation) return;
             _keyboard.Install();
             if (!StartDock(_registerAppBarWhenActive))
                 throw new InvalidOperationException("Dock 无法注册为 Windows 桌面栏，已回滚专注模式。");
+            if (_dockEntries.Count > 0 && _registerAppBarWhenActive
+                && (_mainWindow == null || !TryGetAppBarLayout(out var layout)
+                    || !AppBarWindowService.ExpandFocusWorkArea(_mainWindow, layout.WorkArea)))
+                throw new InvalidOperationException("完整工作区未能设置，已取消专注模式。");
             IsActive = true;
         }
         catch
@@ -84,11 +99,13 @@ public sealed class FocusModeService
             Recover();
             throw;
         }
+        finally { _entering = false; }
     }
 
     public void Exit()
     {
-        if (!IsActive && _dock == null) return;
+        if (!IsActive && !_entering && _dock == null) return;
+        if (_mainWindow != null) WindowTransitions.SetVisible(_mainWindow, false);
         IsActive = false;
         _keyboard.Uninstall();
         var dockReleased = ReleaseDock();
@@ -131,7 +148,7 @@ public sealed class FocusModeService
     private bool StartDock(bool registerAppBar)
     {
         if (_dockEntries.Count == 0) return true;
-        if (_dock != null) return !_dock.IsClosed;
+        if (_dock != null) return !_dock.IsClosed && (_dock.IsVisible || _dock.TryShowDock(registerAppBar));
         if (_mainWindow == null) return false;
 
         try

@@ -1,5 +1,7 @@
 # Focus Desk Dock 1.2.1-rc.1 — 新版候选
 
+历史记录：该候选 Release 已在 2026-11-08 的整理中移除，同名 Git 标签保留。当前主版本见 [v1.2.4](v1.2.4.md)，下文描述当时的功能与验证范围。
+
 这是带外部软件 Dock 的开发候选，以 GitHub Pre-release 发布，不替换既有 Latest。源码位于 `new` 分支，标签为 `dock-v1.2.1-rc.1`；程序内部版本为 1.2.1。
 
 不需要外部软件 Dock 的用户可继续使用 `main` 分支对应的旧版 [v1.0.8](https://github.com/ai-lcs/focus-desktop/releases/tag/v1.0.8)。本次不修改旧分支、旧标签或旧版附件。

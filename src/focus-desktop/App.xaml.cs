@@ -21,7 +21,7 @@ public partial class App : System.Windows.Application
     /// <summary>全局焦点模式服务（异常兜底和主窗口都要访问）。</summary>
     internal FocusModeService Focus => _focus;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         _options = AppOptions.Parse(e.Args);
@@ -219,6 +219,12 @@ public partial class App : System.Windows.Application
                 return;
             }
 
+            var stagedDock = (legacy || FirstRunSetup.IsSetupComplete()) && settings.ExternalApps is { Count: > 0 };
+            if (stagedDock)
+            {
+                WindowTransitions.SetVisible(main, false);
+                main.PrepareForAppBarDock();
+            }
             main.Show();
             if (!legacy && !FirstRunSetup.IsSetupComplete())
             {
@@ -227,7 +233,7 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                try { _focus.Enter(); } // 真实模式：进锁定
+                try { await _focus.EnterAsync(); WindowTransitions.SetVisible(main, true); } // Final bounds before first visible frame.
                 catch (Exception ex)
                 {
                     main.ReturnToFocusDesk();
@@ -258,7 +264,7 @@ public partial class App : System.Windows.Application
     private void ShowExternalAppsSupplement(AppSettings original, MainWindow main, bool legacy)
     {
         var supplement = new AppSupplementWindow(original);
-        supplement.Completed += updated =>
+        supplement.Completed += async updated =>
         {
             try
             {
@@ -270,7 +276,7 @@ public partial class App : System.Windows.Application
                     return;
                 }
 
-                try { _focus.Enter(); }
+                try { await _focus.EnterAsync(); }
                 catch (Exception ex)
                 {
                     main.ReturnToFocusDesk();
@@ -335,7 +341,7 @@ public partial class App : System.Windows.Application
                 if (!IsFocusDeskMainWindow(hwnd)) continue;
 
                     PostMessage(hwnd, focus_desktop.MainWindow.WmPrepareUninstall, IntPtr.Zero, IntPtr.Zero);
-                if (process.WaitForExit(2500)) continue;
+                if (process.WaitForExit(10000)) continue;
 
                 // A non-responsive or drafting instance must be left intact.
                 return 1;

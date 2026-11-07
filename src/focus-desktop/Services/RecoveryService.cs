@@ -23,7 +23,8 @@ public static class RecoveryService
         [property: JsonPropertyName("work_top")] int? WorkTop = null,
         [property: JsonPropertyName("work_right")] int? WorkRight = null,
         [property: JsonPropertyName("work_bottom")] int? WorkBottom = null,
-        [property: JsonPropertyName("session_generation")] string? SessionGeneration = null);
+        [property: JsonPropertyName("session_generation")] string? SessionGeneration = null,
+        [property: JsonPropertyName("original_taskbar_state")] int? OriginalTaskbarState = null);
 
     internal static string MarkActive(MonitorWorkAreaSnapshot? originalMonitor = null)
     {
@@ -39,7 +40,8 @@ public static class RecoveryService
                 processId: processId,
                 startTicks: startTicks,
                 originalMonitor: originalMonitor,
-                sessionGeneration: generation)));
+                sessionGeneration: generation,
+                taskbarState: TaskbarService.ReadShellState())));
         return generation;
     }
 
@@ -77,7 +79,8 @@ public static class RecoveryService
                     processId,
                     startTicks,
                     monitorSnapshot,
-                    state?.SessionGeneration ?? Guid.NewGuid().ToString("N"))));
+                    state?.SessionGeneration ?? Guid.NewGuid().ToString("N"),
+                    state?.OriginalTaskbarState)));
             return true;
         }
         catch
@@ -98,7 +101,7 @@ public static class RecoveryService
         }
 
         var state = ReadState();
-        if (state?.FocusModeActive != true)
+        if (state?.FocusModeActive != true || state.OriginalTaskbarState is < 0 or > 3)
         {
             reason = "恢复记录不可读或内容无效";
             return false;
@@ -289,6 +292,7 @@ public static class RecoveryService
         var parentExited = IsProcessIdentityExited(parentPid, parentStartTicks);
         var hwndDestroyed = parentExited && AppBarWindowService.IsOriginalWindowDestroyed(
             new IntPtr(hwnd), parentPid, parentStartTicks);
+        if (hwndDestroyed) AppBarWindowService.TryRestoreWorkArea(monitorSnapshot);
         var workAreaMatches = AppBarWindowService.WorkAreaMatches(monitorSnapshot);
         if (!CanConfirmAppBarReleased(parentExited, hwndDestroyed, workAreaMatches))
         {
@@ -349,6 +353,7 @@ public static class RecoveryService
 
         var hwndDestroyed = AppBarWindowService.IsOriginalWindowDestroyed(
             new IntPtr(hwnd), processId, startTicks);
+        if (hwndDestroyed) AppBarWindowService.TryRestoreWorkArea(monitorSnapshot);
         var workAreaMatches = AppBarWindowService.WorkAreaMatches(monitorSnapshot);
         if (!CanConfirmOwnedAppBarReleased(true, hwndDestroyed, workAreaMatches))
         {
@@ -384,7 +389,7 @@ public static class RecoveryService
 
     private static SessionState CreateState(bool focusModeActive, bool appBarExpected,
         IntPtr hwnd = default, int? processId = null, long? startTicks = null,
-        MonitorWorkAreaSnapshot? originalMonitor = null, string? sessionGeneration = null)
+        MonitorWorkAreaSnapshot? originalMonitor = null, string? sessionGeneration = null, int? taskbarState = null)
     {
         var snapshot = originalMonitor;
         return new SessionState(
@@ -402,8 +407,12 @@ public static class RecoveryService
             snapshot?.WorkArea.Top,
             snapshot?.WorkArea.Right,
             snapshot?.WorkArea.Bottom,
-            sessionGeneration);
+            sessionGeneration, taskbarState);
     }
+
+    internal static int? OriginalTaskbarState() =>
+        DesktopSessionCoordinator.IsHeldByCurrentThread && TryGetRecoverableSession(out _, out _)
+            ? ReadState()?.OriginalTaskbarState : null;
 
     private static RecoverySessionSnapshot ToSnapshot(SessionState state) =>
         new(state.FocusModeActive, state.SessionGeneration, state.ParentPid, state.ParentStartTicks);

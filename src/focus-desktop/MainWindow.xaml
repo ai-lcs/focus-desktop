@@ -26,14 +26,14 @@
         </LinearGradientBrush>
     </Window.Resources>
 
-    <Grid Background="{StaticResource ComfortBg}">
+    <Grid x:Name="MainLayout" Background="{StaticResource ComfortBg}">
         <Grid.RowDefinitions>
             <RowDefinition Height="44"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
         <!-- 顶栏：Tab 条 | 音量 | DEV | 退出（时间已移到首页大钟） -->
-        <Border Grid.Row="0" Background="#26292E"
+        <Border x:Name="PersistentHeader" Grid.Row="0" Background="#26292E"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <Grid Margin="12,0">
                 <Grid.ColumnDefinitions>

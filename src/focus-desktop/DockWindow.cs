@@ -17,11 +17,8 @@ internal sealed class DockWindow : Window
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoOwnerZOrder = 0x0200;
     private static readonly IntPtr HwndTopmost = new(-1);
-    private const int ReturnHotkeyId = 0x5D01;
-    private const int WmHotkey = 0x0312;
-    private HwndSource? _hotkeySource;
-    private bool _hotkeyRegistered;
-    private IntPtr _hotkeyWindow;
+    private TopBarWindow? _topBar;
+    private readonly bool _fullScreen;
 
     private readonly MainWindow _main;
     private readonly FocusModeService _focus;
@@ -33,9 +30,15 @@ internal sealed class DockWindow : Window
 
     public bool IsExternalWindowForeground => _windows.IsExternalWindowForeground;
     public bool IsClosed => _isClosed;
-    public bool IsAppBarReleased => !_appBar.IsRegistered;
+    public bool IsAppBarReleased => !_appBar.IsRegistered && (_topBar?.IsAppBarReleased ?? true);
+    internal Task CaptureCurrentPlacementsAsync() => Task.Run(_windows.CaptureCurrentPlacements);
     internal bool TryGetAppBarLayout(out AppBarLayout layout)
     {
+        if (_topBar?.Layout is { } topLayout)
+        {
+            layout = topLayout;
+            return true;
+        }
         if (_appBar.IsRegistered && _appBar.Layout is { } current)
         {
             layout = current;
@@ -55,6 +58,9 @@ internal sealed class DockWindow : Window
     {
         _main = main;
         _focus = focus;
+        _fullScreen = fullScreen;
+        WindowTransitions.Disable(this);
+        _main.PersistentNavigationRequested += ReturnToFocusDesk;
 
         Title = "Focus Desk 应用 Dock";
         Width = 96;
@@ -110,13 +116,6 @@ internal sealed class DockWindow : Window
         returnButton.Margin = new Thickness(0, 8, 0, 0);
         returnButton.Click += (_, _) => ReturnToFocusDesk();
         header.Children.Add(returnButton);
-        header.Children.Add(new TextBlock
-        {
-            Text = "返回快捷键\nCtrl+Alt+F10",
-            FontSize = 10,
-            TextAlignment = TextAlignment.Center,
-            Margin = new Thickness(0, 5, 0, 0),
-        });
         Grid.SetRow(header, 0);
         root.Children.Add(header);
 
@@ -161,9 +160,8 @@ internal sealed class DockWindow : Window
         Closed += (_, _) =>
         {
             _isClosed = true;
-            if (_hotkeyRegistered)
-                UnregisterHotKey(_hotkeyWindow, ReturnHotkeyId);
-            _hotkeySource?.RemoveHook(HotkeyWndProc);
+            _main.PersistentNavigationRequested -= ReturnToFocusDesk;
+            _topBar?.Release();
             _appBar.RegistrationLost -= OnRegistrationLost;
             _appBar.LayoutChanged -= OnAppBarLayoutChanged;
             _windows.ActiveExternalWindowUnavailable -= OnActiveExternalWindowUnavailable;
@@ -176,20 +174,21 @@ internal sealed class DockWindow : Window
     {
         try
         {
+            WindowTransitions.SetVisible(this, false);
             Show();
-            var handle = new WindowInteropHelper(this).Handle;
-            _hotkeyWindow = handle;
-            _hotkeySource = HwndSource.FromHwnd(handle);
-            if (_hotkeySource == null) return false;
-            _hotkeySource.AddHook(HotkeyWndProc);
-            // Ctrl+Alt+F10, no autorepeat. A missing return route must cancel entry.
-            _hotkeyRegistered = RegisterHotKey(handle, ReturnHotkeyId, 0x0001 | 0x0002 | 0x4000, 0x79);
-            if (!_hotkeyRegistered) return false;
             if (registerAppBar)
             {
-                return _appBar.Register();
+                if (!_appBar.Register()) return false;
+                _topBar = new TopBarWindow(_main, _fullScreen, () => _appBar.Layout?.ApprovedBounds.Right ?? 0);
+                var shown = _topBar.TryShow(true, OnRegistrationLost);
+                if (TryGetAppBarLayout(out var layout)) _windows.Viewport = layout.WorkArea;
+                if (shown) WindowTransitions.SetVisible(this, true);
+                return shown;
             }
 
+            _topBar = new TopBarWindow(_main, _fullScreen, () => 96);
+            if (!_topBar.TryShow(false, OnRegistrationLost)) return false;
+            WindowTransitions.SetVisible(this, true);
             Topmost = true;
             var hwnd = new WindowInteropHelper(this).Handle;
             if (hwnd != IntPtr.Zero)
@@ -203,10 +202,16 @@ internal sealed class DockWindow : Window
         }
     }
 
-    public bool ReleaseAppBar() => _appBar.Release();
+    public bool ReleaseAppBar()
+    {
+        WindowTransitions.SetVisible(this, false);
+        if (_topBar != null && !_topBar.Release()) return false;
+        return _appBar.Release();
+    }
 
     private async Task ActivateEntryAsync(ExternalAppEntry entry)
     {
+        Activate();
         var intent = _windows.BeginIntent(entry.Id);
         _main.PrepareForExternalWindow();
         _status.Text = $"正在打开 {entry.DisplayName}…";
@@ -233,16 +238,6 @@ internal sealed class DockWindow : Window
             SwpNoActivate | SwpNoOwnerZOrder | SwpNoMove | SwpNoSize);
     }
 
-    private IntPtr HotkeyWndProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (message == WmHotkey && wParam.ToInt32() == ReturnHotkeyId)
-        {
-            handled = true;
-            Dispatcher.BeginInvoke(new Action(() => { if (!_isClosed) ReturnToFocusDesk(); }));
-        }
-        return IntPtr.Zero;
-    }
-
     private void OnRegistrationLost(string reason)
     {
         if (Interlocked.Exchange(ref _registrationFailureQueued, 1) != 0) return;
@@ -257,7 +252,12 @@ internal sealed class DockWindow : Window
 
     private void OnAppBarLayoutChanged(AppBarLayout? layout)
     {
-        if (layout is { } current) _main.ApplyAppBarWorkArea(current.WorkArea);
+        if (layout is { } current)
+        {
+            var viewport = (_topBar?.Layout ?? current).WorkArea;
+            _main.ApplyAppBarWorkArea(viewport);
+            _windows.Viewport = viewport;
+        }
     }
 
     private void OnActiveExternalWindowUnavailable(long revision, long intent)
@@ -292,12 +292,6 @@ internal sealed class DockWindow : Window
         Cursor = System.Windows.Input.Cursors.Hand,
         ToolTip = text,
     };
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
-
-    [DllImport("user32.dll")]
-    private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y,

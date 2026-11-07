@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 )
 
@@ -27,7 +27,7 @@ Assert-NotContains $installer 'AppId=\{\{7B3F9E2A' "legacy installation identity
 Assert-Contains $installer 'DefaultDirName=\{autopf\}\\FocusDeskDock' "Dock uses a separate default install directory"
 Assert-Contains $installer 'function PrepareToInstall' "existing unmarked or portable installations are rejected"
 Assert-Contains $installer 'dock-install.identity' "new installation carries its own marker"
-Assert-Contains $installer '#define Version "1\.2\.1"' "candidate Setup fallback version is 1.2.1"
+Assert-Contains $installer '#define Version "1\.2\.4"' "candidate Setup fallback version is 1.2.4"
 Assert-Contains $installer 'Parameters:\s*"--first-run-if-needed";\s*Flags: nowait runasoriginaluser' "first-run eligibility is evaluated after launch as the actual user"
 Assert-NotContains $installer "ShouldLaunchFirstRun|LocalAppDataPath" "Setup does not guess the data owner from its elevated account"
 Assert-Contains $app 'e.Args.Contains\("--first-run-if-needed"' "app processes the original-user first-run gate"

@@ -46,12 +46,33 @@ public partial class MainWindow : Window
     private string _currentDir;
 
     private bool _recoveryExitDone;
+    internal event Action? PersistentNavigationRequested;
+    private bool _headerDetached;
+
+    internal FrameworkElement DetachHeader()
+    {
+        MainLayout.Children.Remove(PersistentHeader);
+        MainLayout.RowDefinitions[0].Height = new GridLength(0);
+        _headerDetached = true;
+        return PersistentHeader;
+    }
+
+    internal void RestoreHeader()
+    {
+        if (!_headerDetached) return;
+        MainLayout.Children.Add(PersistentHeader);
+        MainLayout.RowDefinitions[0].Height = new GridLength(44);
+        _headerDetached = false;
+    }
 
     public MainWindow(AppOptions options, FocusModeService focus)
     {
         _options = options;
         _focus = focus;
         InitializeComponent();
+        WindowTransitions.Disable(this);
+        TabBar.PreviewMouseLeftButtonDown += (_, _) => { if (_headerDetached) PersistentNavigationRequested?.Invoke(); };
+        ExitButton.PreviewMouseLeftButtonDown += (_, _) => { if (_headerDetached) PersistentNavigationRequested?.Invoke(); };
 
         var cfg = AppSettings.LoadOrDefault();
         _firstRunWizardPending = !cfg.IsConfigured() && !cfg.IsLegacyConfig(); // F1：首配轮延迟预热
@@ -248,6 +269,7 @@ public partial class MainWindow : Window
 
     internal void ReturnToFocusDesk()
     {
+        WindowTransitions.SetVisible(this, true);
         if (!IsVisible) Show();
         Topmost = _focus.IsActive;
         if (_focus.TryGetAppBarLayout(out var layout)) ApplyAppBarWorkArea(layout.WorkArea);
@@ -1399,11 +1421,12 @@ public partial class MainWindow : Window
             Cursor = System.Windows.Input.Cursors.Hand,
             BorderThickness = new Thickness(0),
         };
-        startBtn.Click += (_, _) =>
+        startBtn.Click += async (_, _) =>
         {
             try
             {
-                _focus.Enter(); // 从这一刻起锁定
+                startBtn.IsEnabled = false;
+                await _focus.EnterAsync(); // Final layout before lock is complete.
                 FirstRunSetup.CompleteSetup();
                 banner.Visibility = Visibility.Collapsed;
                 ApplyFocusModeBounds();
@@ -1413,6 +1436,7 @@ public partial class MainWindow : Window
             {
                 _focus.Recover();
                 ReturnToFocusDesk();
+                startBtn.IsEnabled = true;
                 var recoveryStatus = RecoveryService.WasActiveLastTime()
                     ? "系统恢复状态仍未确认，恢复标记已保留；Focus Desk 不会继续锁定。请先运行 --restore 并按提示恢复显示器工作区。"
                     : "系统恢复状态已确认。修正原因后可以重试。";

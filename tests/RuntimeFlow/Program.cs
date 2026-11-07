@@ -16,7 +16,7 @@ using focus_desktop.Services;
 
 // Uses its own build directory/profile, local pages and disposable fixture.
 // --formal temporarily hides the taskbar and registers a real AppBar/keyboard
-// hook, with production recovery and watchdog. Never uses a user application.
+// hook, with production recovery and watchdog. --existing-app only adjusts an explicitly selected running application.
 internal static class Program
 {
     [STAThread]
@@ -29,11 +29,25 @@ internal static class Program
             var fixtureApp = new System.Windows.Application();
             var fixture = new Window
             {
-                Title = "Disposable flow fixture", WindowStyle = WindowStyle.None,
-                ResizeMode = ResizeMode.NoResize, WindowState = WindowState.Maximized,
+                Title = "Disposable flow fixture", WindowStyle = WindowStyle.SingleBorderWindow,
+                ResizeMode = ResizeMode.CanResize, WindowState = WindowState.Maximized,
                 Content = new System.Windows.Controls.TextBox { Text = "Unsaved synthetic fixture draft" },
             };
-            var timeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(120) };
+            fixture.SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(fixture).Handle)!.AddHook(
+                (IntPtr hwnd, int message, IntPtr w, IntPtr l, ref bool handled) =>
+                {
+                    if (message is 0x0200 or 0x00A0 or 0x0201 or 0x00A1)
+                    {
+                        NativeMethods.GetCursorPos(out var point);
+                        if (point.Y >= System.Windows.Forms.Screen.PrimaryScreen!.Bounds.Bottom - 2)
+                            File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "edge-input-events.jsonl"),
+                                JsonSerializer.Serialize(new { Message = message, X = point.X, Y = point.Y, Ticks = Stopwatch.GetTimestamp() }) + "\n");
+                    }
+                    return IntPtr.Zero;
+                });
+            var timeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(args.Contains("--edge-input") ? 900 : 180) };
+            if (args.Length >= 1 && uint.TryParse(args[0], out var parentId))
+                fixture.Activated += (_, _) => NativeMethods.AllowSetForegroundWindow(parentId);
             timeout.Tick += (_, _) => fixture.Close();
             timeout.Start();
             fixtureApp.Run(fixture);
@@ -43,7 +57,7 @@ internal static class Program
         File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "runtime-progress.log"), "Main reached\n");
         _ = Task.Run(async () =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(120));
+            await Task.Delay(TimeSpan.FromSeconds(args.Contains("--edge-input") ? 900 : 180));
             File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "runtime-progress.log"), "TIMEOUT\n");
             Environment.Exit(3);
         });
@@ -77,9 +91,12 @@ internal sealed class RuntimeApp : System.Windows.Application
         Console.WriteLine("RuntimeFlow: startup");
         MainWindow? main = null;
         Process? externalFixture = null;
+        var ownsFixture = false;
         DesktopSessionLease? desktopLease = null;
         var formal = e.Args.Contains("--formal");
         var focus = new FocusModeService();
+        var originalTaskbarLayered = GetWindowLongPtr(FindWindow("Shell_TrayWnd", null), -20).ToInt64() & 0x80000;
+        var originalTaskbarState = (int)typeof(TaskbarService).GetMethod("ReadShellState", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!;
         using var server = new TcpListener(IPAddress.Loopback, 0);
         using var cancellation = new CancellationTokenSource();
         server.Start();
@@ -94,6 +111,10 @@ internal sealed class RuntimeApp : System.Windows.Application
         try
         {
             Paths.EnsureDirectories();
+            if (e.Args.Contains("--edge-input"))
+                foreach (var name in new[] { "edge-start", "edge-done", "edge-main-ready", "edge-external-ready" })
+                    File.Delete(Path.Combine(Paths.DataDir, name));
+            File.Delete(Path.Combine(AppContext.BaseDirectory, "edge-input-events.jsonl"));
             Console.WriteLine($"RuntimeFlow: profile {Paths.DataDir}");
             var study = Path.Combine(Paths.DataDir, "study");
             Directory.CreateDirectory(study);
@@ -113,37 +134,6 @@ internal sealed class RuntimeApp : System.Windows.Application
             main = new MainWindow(new AppOptions(true, false, false, true), focus);
             main.Show();
             Console.WriteLine("RuntimeFlow: main window shown");
-            if (e.Args.Contains("--hotkey-only"))
-            {
-                var type = typeof(MainWindow).Assembly.GetType("focus_desktop.DockWindow")!;
-                var dockOnly = (Window)Activator.CreateInstance(type, main, focus, Array.Empty<ExternalAppEntry>(), new KeyboardGuardService(), false)!;
-                try
-                {
-                    if (!(bool)Call(dockOnly, "TryShowDock", false)!) throw new Exception("Dock hotkey registration failed");
-                    var handle = new WindowInteropHelper(main).Handle;
-                    if (RegisterHotKey(handle, 0x5D02, 0x4003, 0x79))
-                    {
-                        UnregisterHotKey(handle, 0x5D02);
-                        throw new Exception("Dock did not reserve hotkey");
-                    }
-                    var conflictingDock = (Window)Activator.CreateInstance(type, main, focus, Array.Empty<ExternalAppEntry>(), new KeyboardGuardService(), false)!;
-                    try
-                    {
-                        if ((bool)Call(conflictingDock, "TryShowDock", false)!) throw new Exception("Conflicting Dock unexpectedly succeeded");
-                    }
-                    finally { conflictingDock.Close(); }
-                    Call(dockOnly, "ReturnToFocusDesk");
-                    await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
-                    if (!dockOnly.Topmost || !main.IsVisible) throw new Exception("Return did not restore Dock/main");
-                }
-                finally { dockOnly.Close(); }
-                var target = new WindowInteropHelper(main).Handle;
-                if (!RegisterHotKey(target, 0x5D02, 0x4003, 0x79)) throw new Exception("Return hotkey leaked after close");
-                UnregisterHotKey(target, 0x5D02);
-                Console.WriteLine("PASS native hotkey reservation, conflicting Dock refusal, return method, and release; no physical keyboard input");
-                Result = 0;
-                return;
-            }
             WebTabService? web = null;
             for (var attempt = 0; attempt < 300; attempt++)
             {
@@ -169,16 +159,26 @@ internal sealed class RuntimeApp : System.Windows.Application
             var views = web.Tabs.Select(t => t.View).ToArray();
             var tokens = new List<string>();
             foreach (var view in views) tokens.Add(await view!.CoreWebView2.ExecuteScriptAsync("window.flowToken"));
-            var fixturePath = Path.Combine(AppContext.BaseDirectory, "FlowFixture.exe");
-            File.Copy(Environment.ProcessPath!, fixturePath, true);
+            var existingPath = e.Args.FirstOrDefault(arg => arg.StartsWith("--existing-app="))?[15..];
+            var fixturePath = existingPath ?? Path.Combine(AppContext.BaseDirectory, "FlowFixture.exe");
+            if (existingPath == null) File.Copy(Environment.ProcessPath!, fixturePath, true);
             var fixtureEntry = ExternalAppCatalog.Resolve(fixturePath);
-            externalFixture = Process.Start(new ProcessStartInfo(fixturePath) { UseShellExecute = false });
+            if (existingPath == null)
+            {
+                externalFixture = Process.Start(new ProcessStartInfo(fixturePath) { UseShellExecute = false, Arguments = Environment.ProcessId.ToString() + (e.Args.Contains("--edge-input") ? " --edge-input" : "") });
+                ownsFixture = true;
+            }
+            else externalFixture = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(fixturePath))
+                .FirstOrDefault(process => string.Equals(process.MainModule?.FileName, fixturePath, StringComparison.OrdinalIgnoreCase)
+                    && process.MainWindowHandle != IntPtr.Zero) ?? throw new Exception("Explicit existing app is not running; test never launches it");
             for (var attempt = 0; attempt < 100; attempt++)
             {
                 externalFixture!.Refresh();
                 if (externalFixture.MainWindowHandle != IntPtr.Zero) break;
                 await Task.Delay(50);
             }
+            var originalPlacement = new NativePlacement { Length = Marshal.SizeOf<NativePlacement>() };
+            if (!GetWindowPlacement(externalFixture!.MainWindowHandle, ref originalPlacement)) throw new Exception("Original external placement unavailable");
             var dockType = typeof(MainWindow).Assembly.GetType("focus_desktop.DockWindow")!;
             Window dock;
             if (formal)
@@ -187,14 +187,16 @@ internal sealed class RuntimeApp : System.Windows.Application
                 settings.ExternalApps = new() { fixtureEntry };
                 settings.Save();
                 Call(main, "ConfigureDock", settings, true);
-                focus.Enter();
+                await focus.EnterAsync();
                 dock = (Window)Field(focus, "_dock")!;
                 if (IsWindowVisible(FindWindow("Shell_TrayWnd", null))) throw new Exception("Formal taskbar did not hide");
                 if (!GetWindowRect(new WindowInteropHelper(main).Handle, out var mainBounds)
                     || !GetWindowRect(new WindowInteropHelper(dock).Handle, out var dockBounds)) throw new Exception("Window bounds unavailable");
+                var topWindow = (Window)Field(dock, "_topBar")!;
+                if (!GetWindowRect(new WindowInteropHelper(topWindow).Handle, out var topBounds) || topBounds.Top != 0 || topBounds.Left != dockBounds.Right) throw new Exception($"Top bar bounds invalid: {topBounds.Left},{topBounds.Top},{topBounds.Right},{topBounds.Bottom}; dockRight={dockBounds.Right}");
                 var screen = System.Windows.Forms.Screen.PrimaryScreen!.Bounds;
                 if (dockBounds.Top != screen.Top || dockBounds.Bottom != screen.Bottom
-                    || mainBounds.Top != screen.Top || mainBounds.Bottom != screen.Bottom
+                    || mainBounds.Top != topBounds.Bottom || mainBounds.Bottom != screen.Bottom
                     || mainBounds.Left != dockBounds.Right || mainBounds.Right != screen.Right)
                     throw new Exception("Formal main/Dock leave a gap or overlap");
                 Console.WriteLine($"PASS formal native bounds: Dock bottom={dockBounds.Bottom}, main bottom={mainBounds.Bottom}, screen bottom={screen.Bottom}; system taskbar hidden");
@@ -202,35 +204,14 @@ internal sealed class RuntimeApp : System.Windows.Application
             else dock = (Window)Activator.CreateInstance(dockType, main, focus, new[] { fixtureEntry }, new KeyboardGuardService(), false)!;
             try
             {
-                if (!formal && !(bool)Call(dock, "TryShowDock", false)!) throw new Exception("Dock/hotkey registration failed");
-                if (e.Args.Contains("--observe"))
+                if (!formal && !(bool)Call(dock, "TryShowDock", false)!) throw new Exception("Dock registration failed");
+                if (e.Args.Contains("--edge-input"))
                 {
-                    var returnReceived = false;
-                    HwndSourceHook observeHotkey = (IntPtr window, int message, IntPtr key, IntPtr parameter, ref bool handled) =>
-                    {
-                        if (message == 0x0312 && key.ToInt32() == 0x5D01)
-                        {
-                            returnReceived = true;
-                            Console.WriteLine("OBSERVE: native WM_HOTKEY received by test Dock");
-                        }
-                        return IntPtr.Zero;
-                    };
-                    var source = HwndSource.FromHwnd(new WindowInteropHelper(dock).Handle);
-                    source.AddHook(observeHotkey);
-                    await (Task)Call(dock, "ActivateEntryAsync", fixtureEntry)!;
-                    Console.WriteLine("OBSERVE: disposable full-screen fixture active; waiting 60 seconds for physical Ctrl+Alt+F10");
-                    await Task.Delay(60000);
-                    source.RemoveHook(observeHotkey);
-                    if (!returnReceived || !main.IsActive || !dock.Topmost)
-                        throw new Exception($"Physical return not confirmed: hotkeyReceived={returnReceived}, mainActive={main.IsActive}, dockTopmost={dock.Topmost}");
-                    Console.WriteLine("PASS observed physical hotkey returned to Focus Desk and restored Dock");
+                    File.WriteAllText(Path.Combine(Paths.DataDir, "edge-main-ready"), Environment.ProcessId.ToString());
+                    await WaitForEdgeSignal("edge-start");
                 }
+                else if (e.Args.Contains("--observe")) await Task.Delay(60000);
                 var hwnd = new WindowInteropHelper(dock).Handle;
-                if (RegisterHotKey(hwnd, 0x5D02, 0x4003, 0x79))
-                {
-                    UnregisterHotKey(hwnd, 0x5D02);
-                    throw new Exception("Return hotkey is not reserved by Dock");
-                }
                 Call(main, "ToggleTimer");
                 var phaseStart = Field(main, "_phaseStart");
                 HardFocus.Enable(true);
@@ -252,9 +233,51 @@ internal sealed class RuntimeApp : System.Windows.Application
                         {
                             var externalStart = Stopwatch.GetTimestamp();
                             await (Task)Call(dock, "ActivateEntryAsync", fixtureEntry)!;
+                            for (var settle = 0; settle < 15
+                                && !((ExternalAppWindowService)Field(dock, "_windows")!).IsExternalWindowForeground; settle++)
+                                await Task.Delay(16);
                             if (!((ExternalAppWindowService)Field(dock, "_windows")!).IsExternalWindowForeground)
-                                throw new Exception("Native fixture activation was refused or lost");
+                                throw new Exception($"Native fixture activation failed: mainActive={main.IsActive}, dockActive={dock.IsActive}; " + ((System.Windows.Controls.TextBlock)Field(dock, "_status")!).Text
+                                    + "; " + Field(Field(dock, "_windows")!, "_layout")!.GetType().GetProperty("LastFailure", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Field(Field(dock, "_windows")!, "_layout")));
+                            externalFixture!.Refresh();
+                            var topBar = (Window)Field(dock, "_topBar")!;
+                            if (!GetWindowRect(new WindowInteropHelper(topBar).Handle, out var topRect)
+                                || DwmGetWindowAttribute(GetForegroundWindow(), 9, out var appRect, Marshal.SizeOf<NativeRect>()) != 0)
+                                throw new Exception("External visible frame not available");
+                            var screen = System.Windows.Forms.Screen.PrimaryScreen!.Bounds;
+                            if (appRect.Left != topRect.Left || appRect.Top != topRect.Bottom
+                                || appRect.Right != screen.Right || appRect.Bottom != screen.Bottom)
+                                throw new Exception($"External frame leaves gap: {appRect.Left},{appRect.Top},{appRect.Right},{appRect.Bottom}");
+                            var topWindow = (Window)Field(dock, "_topBar")!;
+                            if (!topWindow.IsVisible || !topWindow.Topmost || !dock.Topmost) throw new Exception("Persistent bars disappeared");
                             externalSwitches.Add(Stopwatch.GetElapsedTime(externalStart).TotalMilliseconds);
+                            if (cycle == 0 && formal && e.Args.Contains("--reveal-regression"))
+                            {
+                                heartbeat.Stop();
+                                var tray = FindWindow("Shell_TrayWnd", null);
+                                for (var reveal = 0; reveal < 20; reveal++)
+                                {
+                                    ShowWindow(tray, 8); // Explorer's hover reveal must not expose or hit-test the tray.
+                                    await Task.Delay(50);
+                                    if (!(bool)typeof(TaskbarService).GetMethod("IsRevealSuppressed", BindingFlags.Static | BindingFlags.NonPublic, null, Type.EmptyTypes, null)!.Invoke(null, null)!)
+                                        throw new Exception("Taskbar reveal suppression was lost");
+                                    var bottomHit = WindowFromPoint(new NativePoint { X = screen.Width / 2, Y = screen.Bottom - 1 });
+                                    if (GetAncestor(bottomHit, 2) == tray) throw new Exception("Invisible taskbar still intercepts the screen edge");
+                                }
+                                Console.WriteLine("PASS 20 forced taskbar reveals: alpha zero retained and bottom hit-test passes through");
+                                lastTick = Stopwatch.GetTimestamp(); heartbeat.Start();
+                            }
+                            if (cycle == 0 && e.Args.Contains("--edge-input"))
+                            {
+                                heartbeat.Stop();
+                                File.WriteAllText(Path.Combine(Paths.DataDir, "edge-external-ready"), Environment.ProcessId.ToString());
+                                await WaitForEdgeSignal("edge-done");
+                                if (!(bool)typeof(TaskbarService).GetMethod("IsRevealSuppressed", BindingFlags.Static | BindingFlags.NonPublic, null, Type.EmptyTypes, null)!.Invoke(null, null)!)
+                                    throw new Exception("Taskbar suppression lost during actual bottom-edge input");
+                                Console.WriteLine("PASS taskbar suppression retained after actual edge input");
+                                lastTick = Stopwatch.GetTimestamp(); heartbeat.Start();
+                            }
+                            if (cycle == 0 && e.Args.Contains("--observe-external")) { heartbeat.Stop(); Console.WriteLine("OBSERVE external viewport for 60 seconds"); await Task.Delay(60000); lastTick = Stopwatch.GetTimestamp(); heartbeat.Start(); }
                             Call(dock, "ReturnToFocusDesk");
                             await Task.Delay(20);
                         }
@@ -267,10 +290,22 @@ internal sealed class RuntimeApp : System.Windows.Application
             finally { if (formal) focus.Exit(); else dock.Close(); }
             if (formal && (!IsWindowVisible(FindWindow("Shell_TrayWnd", null)) || focus.HasRecoveryResponsibility))
                 throw new Exception("Formal taskbar/AppBar recovery was not confirmed");
-            if (formal) Console.WriteLine("PASS formal exit: taskbar visible, AppBar/work area recovered, recovery marker clean");
-            var releaseWindow = new WindowInteropHelper(main).Handle;
-            if (!RegisterHotKey(releaseWindow, 0x5D02, 0x4003, 0x79)) throw new Exception("Dock leaked the return hotkey");
-            UnregisterHotKey(releaseWindow, 0x5D02);
+            if (formal && originalTaskbarState != (int)typeof(TaskbarService).GetMethod("ReadShellState", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!)
+                throw new Exception("Original taskbar auto-hide/always-on-top state was not restored");
+            for (var attempt = 0; attempt < 30; attempt++)
+            {
+                var restoredPlacement = new NativePlacement { Length = Marshal.SizeOf<NativePlacement>() };
+                if (GetWindowPlacement(externalFixture!.MainWindowHandle, ref restoredPlacement)
+                    && restoredPlacement.ShowCommand == originalPlacement.ShowCommand
+                    && restoredPlacement.NormalPosition.Equals(originalPlacement.NormalPosition)) break;
+                if (attempt == 29) throw new Exception($"Original external placement was not restored: before={originalPlacement.ShowCommand}/{originalPlacement.NormalPosition.Left},{originalPlacement.NormalPosition.Top},{originalPlacement.NormalPosition.Right},{originalPlacement.NormalPosition.Bottom}; after={restoredPlacement.ShowCommand}/{restoredPlacement.NormalPosition.Left},{restoredPlacement.NormalPosition.Top},{restoredPlacement.NormalPosition.Right},{restoredPlacement.NormalPosition.Bottom}");
+                await Task.Delay(16);
+            }
+            if (formal && ((GetWindowLongPtr(FindWindow("Shell_TrayWnd", null), -20).ToInt64() & 0x80000) != originalTaskbarLayered
+                || GetProp(FindWindow("Shell_TrayWnd", null), "FocusDesk.Dock.TaskbarReveal.v1") != IntPtr.Zero))
+                throw new Exception("Taskbar appearance or suppression snapshot was not restored");
+            Console.WriteLine("PASS external original placement restored after exit");
+            if (formal) Console.WriteLine("PASS formal exit: taskbar visible and original settings restored, AppBar/work area recovered, recovery marker clean");
             for (var index = 0; index < views.Length; index++)
             {
                 if (!ReferenceEquals(views[index], web.Tabs[index].View)) throw new Exception("WebView recreated during return");
@@ -280,7 +315,7 @@ internal sealed class RuntimeApp : System.Windows.Application
                 if (await view.CoreWebView2.ExecuteScriptAsync("document.cookie.includes('flow=preserved')") != "true") throw new Exception("Cookie lost");
             }
             static double Percentile(List<double> values, double fraction) => values.Order().ElementAt((int)((values.Count - 1) * fraction));
-            var report = new { FormalMode = formal, PhysicalHotkeyCheck = e.Args.Contains("--observe"), SwitchCount = switches.Count, SwitchP95Ms = Percentile(switches, .95), SwitchMaxMs = switches.Max(), ExternalSwitchCount = externalSwitches.Count, ExternalSwitchP95Ms = Percentile(externalSwitches, .95), ExternalSwitchMaxMs = externalSwitches.Max(), HeartbeatP95Ms = Percentile(ticks, .95), HeartbeatMaxMs = ticks.Max(), WebViewsPreserved = true, PageDraftsCookiesPreserved = true, TimerAndHardFocusPreserved = true, HotkeyReservedAndReleased = true, Mode = "Local pages and disposable full-screen fixture; switch handlers called directly; observe mode additionally requires native hotkey input" };
+            var report = new { FormalMode = formal, SwitchCount = switches.Count, SwitchP95Ms = Percentile(switches, .95), SwitchMaxMs = switches.Max(), ExternalSwitchCount = externalSwitches.Count, ExternalSwitchP95Ms = Percentile(externalSwitches, .95), ExternalSwitchMaxMs = externalSwitches.Max(), HeartbeatP95Ms = Percentile(ticks, .95), HeartbeatMaxMs = ticks.Max(), WebViewsPreserved = true, PageDraftsCookiesPreserved = true, TimerAndHardFocusPreserved = true, PersistentBarsRetained = true, Mode = existingPath == null ? "Local pages and disposable full-screen fixture; switch handlers called directly" : "Local pages and explicitly selected existing application; switch handlers called directly" };
             Console.WriteLine(JsonSerializer.Serialize(report));
             if (report.SwitchP95Ms > 150 || report.HeartbeatP95Ms > 75 || report.SwitchMaxMs > 500 || report.HeartbeatMaxMs > 500 || report.ExternalSwitchMaxMs > 1000)
                 throw new Exception("Synthetic ready-state responsiveness exceeded threshold");
@@ -294,8 +329,11 @@ internal sealed class RuntimeApp : System.Windows.Application
             HardFocus.Release();
             if (externalFixture != null)
             {
-                externalFixture.CloseMainWindow();
-                if (!externalFixture.WaitForExit(3000)) externalFixture.Kill();
+                if (ownsFixture)
+                {
+                    externalFixture.CloseMainWindow();
+                    if (!externalFixture.WaitForExit(3000)) externalFixture.Kill();
+                }
                 externalFixture.Dispose();
             }
             main?.Close();
@@ -304,6 +342,18 @@ internal sealed class RuntimeApp : System.Windows.Application
             server.Stop();
             Shutdown();
         }
+    }
+
+    private static async Task WaitForEdgeSignal(string name)
+    {
+        var started = Stopwatch.StartNew();
+        while (started.Elapsed < TimeSpan.FromSeconds(600))
+        {
+            var signal = Path.Combine(Paths.DataDir, name);
+            if (File.Exists(signal) && File.ReadAllText(signal).Trim() == Environment.ProcessId.ToString()) return;
+            await Task.Delay(100);
+        }
+        throw new TimeoutException("Actual input observation was not completed");
     }
 
     private static async Task Serve(TcpListener listener, CancellationToken token)
@@ -324,10 +374,25 @@ internal sealed class RuntimeApp : System.Windows.Application
         catch (Exception) when (token.IsCancellationRequested) { }
     }
 
-    [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
-    [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string className, string? name);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect bounds);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(NativePoint point);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flag);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", ExactSpelling = true)] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetProp(IntPtr hwnd, string name);
+    [DllImport("user32.dll")] private static extern bool GetWindowPlacement(IntPtr hwnd, ref NativePlacement placement);
+    [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativePlacement { public int Length, Flags, ShowCommand; public NativePoint Min, Max; public NativeRect NormalPosition; }
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out NativeRect rect, int size);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+}
+
+internal static class NativeMethods
+{
+    [StructLayout(LayoutKind.Sequential)] internal struct Point { public int X, Y; }
+    [DllImport("user32.dll")] internal static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")] internal static extern bool AllowSetForegroundWindow(uint processId);
 }

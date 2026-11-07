@@ -18,6 +18,8 @@ public static class TaskbarService
     private const int SW_SHOW = 5;
     private const int SM_CXSCREEN = 0;
     private const int SM_CYSCREEN = 1;
+    private const long WsExLayered = 0x00080000;
+    private const string RevealSnapshot = "FocusDesk.Dock.TaskbarReveal.v1";
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindow(string lpClassName, string? lpWindowName);
@@ -38,6 +40,21 @@ public static class TaskbarService
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int nIndex);
 
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", ExactSpelling = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", ExactSpelling = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+    [DllImport("user32.dll")]
+    private static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint key, out byte alpha, out uint flags);
+    [DllImport("user32.dll")]
+    private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint key, byte alpha, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool SetProp(IntPtr hwnd, string name, IntPtr value);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetProp(IntPtr hwnd, string name);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr RemoveProp(IntPtr hwnd, string name);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -47,9 +64,43 @@ public static class TaskbarService
         "Shell_SecondaryTrayWnd"  // 副屏任务栏（有的机器上存在；找不到就跳过）
     };
 
-    public static bool Hide()
+    internal static int ReadShellState()
+    {
+        var data = new AppBarData { Size = Marshal.SizeOf<AppBarData>(), Window = FindWindow("Shell_TrayWnd", null) };
+        if (data.Window == IntPtr.Zero) throw new InvalidOperationException("未找到系统任务栏。");
+        return (int)SHAppBarMessage(4, ref data).ToUInt64();
+    }
+
+    private static bool SetShellState(int state)
+    {
+        var data = new AppBarData { Size = Marshal.SizeOf<AppBarData>(), Window = FindWindow("Shell_TrayWnd", null), Parameter = new IntPtr(state) };
+        SHAppBarMessage(10, ref data);
+        return ReadShellState() == state;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct AppBarData
+    {
+        public int Size;
+        public IntPtr Window;
+        public uint Callback, Edge;
+        public RECT Rectangle;
+        public IntPtr Parameter;
+    }
+    [DllImport("shell32.dll")] private static extern UIntPtr SHAppBarMessage(uint message, ref AppBarData data);
+
+    public static bool Hide(bool releaseReservation = false)
     {
         if (!DesktopSessionCoordinator.IsHeldByCurrentThread) return false;
+        // Explorer can show an auto-hidden tray again when the pointer touches
+        // the edge. Alpha zero keeps that window invisible and hit-test transparent.
+        // Store its original appearance on the HWND so the watchdog can restore it;
+        // a recreated Explorer window cannot inherit an old window's snapshot.
+        foreach (var cls in TrayWindowClasses)
+        {
+            var hwnd = FindWindow(cls, null);
+            if (hwnd != IntPtr.Zero && !SuppressReveal(hwnd)) return false;
+        }
+        if (releaseReservation && !SetShellState(ReadShellState() | 1)) return false;
 
         var primaryFound = false;
         var succeeded = true;
@@ -69,6 +120,73 @@ public static class TaskbarService
         return primaryFound && succeeded;
     }
 
+    private static bool SuppressReveal(IntPtr hwnd)
+    {
+        if (GetProp(hwnd, RevealSnapshot) == IntPtr.Zero)
+        {
+            var layered = (GetWindowLongPtr(hwnd, -20).ToInt64() & WsExLayered) != 0;
+            if (layered)
+            {
+                if (!GetLayeredWindowAttributes(hwnd, out var key, out var alpha, out var flags)) return false;
+                if (!SetProp(hwnd, RevealSnapshot + ".key", new IntPtr(key))
+                    || !SetProp(hwnd, RevealSnapshot + ".alpha", new IntPtr(alpha))
+                    || !SetProp(hwnd, RevealSnapshot + ".flags", new IntPtr(flags)))
+                {
+                    ClearRevealSnapshot(hwnd);
+                    return false;
+                }
+            }
+            if (!SetProp(hwnd, RevealSnapshot, new IntPtr(layered ? 2 : 1)))
+            {
+                ClearRevealSnapshot(hwnd);
+                return false;
+            }
+        }
+        SetWindowLongPtr(hwnd, -20, new IntPtr(GetWindowLongPtr(hwnd, -20).ToInt64() | WsExLayered));
+        return SetLayeredWindowAttributes(hwnd, 0, 0, 2) && IsRevealSuppressed(hwnd);
+    }
+
+    private static bool IsRevealSuppressed(IntPtr hwnd) =>
+        GetProp(hwnd, RevealSnapshot).ToInt64() is 1 or 2
+        && (GetWindowLongPtr(hwnd, -20).ToInt64() & WsExLayered) != 0
+        && GetLayeredWindowAttributes(hwnd, out _, out var alpha, out var flags)
+        && alpha == 0 && (flags & 2) != 0;
+
+    internal static bool IsRevealSuppressed() => IsRevealSuppressed(FindWindow("Shell_TrayWnd", null));
+
+    private static bool RestoreReveal(IntPtr hwnd)
+    {
+        var original = GetProp(hwnd, RevealSnapshot).ToInt64();
+        if (original == 0) return true;
+        var style = GetWindowLongPtr(hwnd, -20).ToInt64();
+        if (original == 1)
+        {
+            SetWindowLongPtr(hwnd, -20, new IntPtr(style & ~WsExLayered));
+            if ((GetWindowLongPtr(hwnd, -20).ToInt64() & WsExLayered) != 0) return false;
+        }
+        else if (original == 2)
+        {
+            var key = (uint)GetProp(hwnd, RevealSnapshot + ".key").ToInt64();
+            var alpha = (byte)GetProp(hwnd, RevealSnapshot + ".alpha").ToInt64();
+            var flags = (uint)GetProp(hwnd, RevealSnapshot + ".flags").ToInt64();
+            SetWindowLongPtr(hwnd, -20, new IntPtr(style | WsExLayered));
+            if (!SetLayeredWindowAttributes(hwnd, key, alpha, flags)
+                || !GetLayeredWindowAttributes(hwnd, out var actualKey, out var actualAlpha, out var actualFlags)
+                || actualKey != key || actualAlpha != alpha || actualFlags != flags) return false;
+        }
+        else return false;
+        ClearRevealSnapshot(hwnd);
+        return true;
+    }
+
+    private static void ClearRevealSnapshot(IntPtr hwnd)
+    {
+        RemoveProp(hwnd, RevealSnapshot + ".key");
+        RemoveProp(hwnd, RevealSnapshot + ".alpha");
+        RemoveProp(hwnd, RevealSnapshot + ".flags");
+        RemoveProp(hwnd, RevealSnapshot);
+    }
+
     /// <summary>
     /// 恢复任务栏显示。仅会话锁持有线程可执行；重试后仍无法确认真实可见时返回 false。
     /// </summary>
@@ -78,6 +196,12 @@ public static class TaskbarService
 
         try
         {
+            if (RecoveryService.OriginalTaskbarState() is int state && !SetShellState(state)) return false;
+            foreach (var cls in TrayWindowClasses)
+            {
+                var hwnd = FindWindow(cls, null);
+                if (hwnd != IntPtr.Zero && !RestoreReveal(hwnd)) return false;
+            }
             return TaskbarRestorePolicy.TryRestore(attempt =>
             {
                 ShowTaskbarsOnce();

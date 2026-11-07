@@ -145,6 +145,26 @@ public sealed class ExternalAppWindowService : IDisposable
     private long _activeWindowRevision;
     private volatile bool _disposed;
     private long _foregroundEventVersion;
+    private readonly ExternalWindowLayout _layout = new();
+    internal DesktopRect? Viewport { get; set; }
+
+    internal void CaptureCurrentPlacements()
+    {
+        var cache = new Dictionary<uint, ExternalWindowIdentity>();
+        EnumWindows((hwnd, parameter) =>
+        {
+            if (!IsWindowVisible(hwnd) || IsCloaked(hwnd) || !IsEligibleWindow(hwnd)
+                || GetWindow(hwnd, GwOwner) != IntPtr.Zero) return true;
+            foreach (var entry in _entries)
+            {
+                if (!TryGetOwnerChain(hwnd, entry, cache, out var identities, out _)
+                    || !MatchesOwnerChain(entry, identities)) continue;
+                _layout.Capture(hwnd);
+                break;
+            }
+            return true;
+        }, IntPtr.Zero);
+    }
 
     public ExternalAppWindowService(IReadOnlyList<ExternalAppEntry> entries, KeyboardGuardService keyboard)
     {
@@ -285,18 +305,21 @@ public sealed class ExternalAppWindowService : IDisposable
         if (dispatcher == null)
             return new(false, false, "Focus Desk 界面已退出，无法切换窗口。");
 
-        var operation = dispatcher.InvokeAsync(() =>
+        var operation = dispatcher.InvokeAsync(async () =>
         {
             if (_disposed || !_intents.IsCurrent(intent)) return new ActivationAttempt(false, true, null);
             if (!IsWindow(hwnd)) return new ActivationAttempt(false, false, "应用窗口已关闭。可以再次点击重试。");
             if (IsIconic(hwnd)) ShowWindowAsync(hwnd, SwRestore);
-            if (!SetForegroundWindow(hwnd))
+            if (Viewport is { } viewport && !await _layout.FitAsync(hwnd, viewport))
+                return new ActivationAttempt(false, false, "应用未能完整铺满工作区，请检查窗口大小或权限。");
+            if (_disposed || !_intents.IsCurrent(intent)) return new ActivationAttempt(false, true, null);
+            if (!SetForegroundWindow(hwnd) && GetForegroundWindow() != hwnd)
                 return new ActivationAttempt(false, false, "Windows 暂未允许切换到该窗口。请再点击一次应用入口。");
             RecordForegroundWindow(entry, hwnd);
             return new ActivationAttempt(true, false, null);
         }, DispatcherPriority.Input);
 
-        return await operation.Task.ConfigureAwait(false);
+        return await (await operation.Task.ConfigureAwait(false)).ConfigureAwait(false);
     }
 
     private static ExternalWindowSwitchResult MakeResult(
@@ -313,6 +336,7 @@ public sealed class ExternalAppWindowService : IDisposable
         _disposed = true;
         _intents.Cancel();
         _lifetime.Cancel();
+        _layout.Dispose();
         if (_foregroundHook != IntPtr.Zero) UnhookWinEvent(_foregroundHook);
         if (_minimizeHook != IntPtr.Zero) UnhookWinEvent(_minimizeHook);
         if (_destroyHook != IntPtr.Zero) UnhookWinEvent(_destroyHook);

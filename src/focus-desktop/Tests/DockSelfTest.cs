@@ -113,6 +113,12 @@ public static class DockSelfTest
             var development = AppBarWindowService.CalculateLayout(approved, monitor, work, false);
             check($"development mode preserves Shell work area at {width}x{height}/{dockWidth}",
                 development == new AppBarLayout(approved, work));
+            var topHeight = dockWidth * 44 / 96;
+            var top = AppBarWindowService.CalculateLayout(new DesktopRect(0, 0, width, topHeight),
+                monitor, new DesktopRect(dockWidth, topHeight, width, height - taskbarHeight), true, true);
+            check($"top bar excludes left Dock and main excludes both bars at {width}x{height}",
+                top.ApprovedBounds == new DesktopRect(dockWidth, 0, width, topHeight)
+                && top.WorkArea == new DesktopRect(dockWidth, topHeight, width, height));
         }
     }
 
@@ -121,7 +127,7 @@ public static class DockSelfTest
         var nativeMethod = typeof(ExternalAppWindowService).GetMethod(
             "OpenProcess", BindingFlags.NonPublic | BindingFlags.Static);
         var import = nativeMethod?.GetCustomAttribute<DllImportAttribute>();
-        var importedMethods = new[] { typeof(ExternalAppWindowService), typeof(AppBarWindowService), typeof(DockWindow) }
+        var importedMethods = new[] { typeof(ExternalAppWindowService), typeof(AppBarWindowService), typeof(ExternalWindowLayout), typeof(WindowTransitions), typeof(TaskbarService), typeof(DockWindow) }
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly))
             .Where(method => (method.Attributes & MethodAttributes.PinvokeImpl) != 0)
             .ToList();
