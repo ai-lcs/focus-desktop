@@ -133,7 +133,7 @@ public partial class App : System.Windows.Application
         // 单实例：防止双击两次造成双重钩子/双重隐藏的混乱状态
         if (!DesktopSessionCoordinator.TryAcquire(out _desktopSessionLease, out var sessionReason))
         {
-            WpfMessageBox.Show(sessionReason, "focus-desktop",
+            WpfMessageBox.Show(sessionReason, "Focus Desk",
                 WpfMessageBoxButton.OK, WpfMessageBoxImage.Information);
             Shutdown();
             return;

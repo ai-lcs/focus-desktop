@@ -19,7 +19,7 @@
 
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
             <TextBlock Text="选择专注期间可使用的软件" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppText}"/>
-            <TextBlock Text="可跳过此步，仅使用学习桌面，不显示软件侧栏。软件名单确认后冻结，修改设置需卸载并清除配置后重新安装。同一应用只能选择一个入口；已有窗口优先复用，不保证切到指定项目或文档。"
+            <TextBlock Text="可跳过此步，仅使用学习桌面，不显示软件侧栏。软件名单确认后冻结，修改设置需卸载后重新安装，卸载会清除应用数据。同一应用只能选择一个入口；已有窗口优先复用，不保证切到指定项目或文档。"
                        Margin="0,6,0,0" FontSize="13" TextWrapping="Wrap" Foreground="{StaticResource AppMuted}"/>
         </StackPanel>
 

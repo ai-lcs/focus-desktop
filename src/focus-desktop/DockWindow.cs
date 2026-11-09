@@ -65,7 +65,7 @@ internal sealed class DockWindow : Window
         WindowTransitions.Disable(this);
         _main.PersistentNavigationRequested += ReturnToFocusDesk;
 
-        Title = "Focus Desk 应用 Dock";
+        Title = "Focus Desk 软件栏";
         Width = 96;
         Height = SystemParameters.PrimaryScreenHeight;
         MinWidth = 96;

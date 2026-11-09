@@ -23,9 +23,9 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 $outputDir = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\')
 $outputParent = Split-Path -Parent $outputDir
-$portableName = "focus-desktop-portable-$version.zip"
-$setupName = "FocusDesktop-Setup-$version.exe"
-$hashName = "v$version-sha256.txt"
+$portableName = "focus-desk-portable-$version.zip"
+$setupName = "FocusDesk-Setup-$version.exe"
+$hashName = "focus-desk-$version-sha256.txt"
 
 if (-not (Test-Path -LiteralPath $notices -PathType Leaf)) { throw "Required notices file is missing: $notices" }
 if (-not $SkipInstaller -and -not (Test-Path -LiteralPath $iss -PathType Leaf)) { throw "Inno Setup source is missing: $iss" }

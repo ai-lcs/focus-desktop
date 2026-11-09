@@ -21,10 +21,13 @@ function Assert-NotContains([string]$Text, [string]$Pattern, [string]$Descriptio
     if ($Text -match $Pattern) { throw "Unsafe installer behavior remains: $Description" }
 }
 
-Assert-Contains $installer "MB_YESNO\s+or\s+MB_DEFBUTTON2" "keep-data is the uninstall prompt default"
+Assert-Contains $installer '#define AppName "Focus Desk"' "product name is Focus Desk"
+Assert-NotContains $installer 'MB_YESNO|RemoveUserData\s*:=' "uninstall offers no keep-data choice"
 Assert-Contains $installer 'AppId=\{\{50D19490-82AC-42D3-95B2-F8EBEA860817\}' "Dock has its own installation identity"
 Assert-NotContains $installer 'AppId=\{\{7B3F9E2A' "legacy installation identity is never reused"
-Assert-Contains $installer 'DefaultDirName=\{autopf\}\\FocusDeskDock' "Dock uses a separate default install directory"
+Assert-Contains $installer 'DefaultDirName=\{autopf\}\\FocusDesk\s' "new installations use the FocusDesk directory"
+Assert-Contains $installer 'UsePreviousGroup=no' "upgrades use the new shortcut group name"
+Assert-Contains $installer '\[InstallDelete\]' "obsolete Dock shortcuts are removed during upgrade"
 Assert-Contains $installer 'function PrepareToInstall' "existing unmarked or portable installations are rejected"
 Assert-Contains $installer 'dock-install.identity' "new installation carries its own marker"
 [xml]$projectXml = Get-Content -Raw -LiteralPath (Join-Path $RepositoryRoot 'src\focus-desktop\focus-desktop.csproj')
@@ -39,8 +42,7 @@ $desktopLock = $app.IndexOf("DesktopSessionCoordinator.TryAcquire", [StringCompa
 if ($firstRunCheck -lt 0 -or $desktopLock -lt 0 -or $firstRunCheck -gt $desktopLock) {
     throw "The first-run data check must return before the app acquires desktop ownership."
 }
-Assert-Contains $installer "PrepareArguments\s*:=\s*'--prepare-uninstall'" "every uninstall first requests the safe helper path"
-Assert-Contains $installer "if\s+RemoveUserData\s+then\s+PrepareArguments\s*:=\s*PrepareArguments\s*\+\s*'\s+--remove-user-data'" "data removal requires an explicit choice"
+Assert-Contains $installer "PrepareArguments\s*:=\s*'--prepare-uninstall --remove-user-data'" "every interactive and silent uninstall requests locked data cleanup"
 Assert-Contains $installer "if\s+\(not\s+Executed\)\s+or\s+\(ResultCode\s*<>\s*0\)\s+then" "a failed helper blocks uninstall"
 Assert-Contains $installer "Result\s*:=\s*False;\s*exit;" "helper failure returns an uninstall refusal"
 Assert-NotContains $installer "CurUninstallStepChanged" "no post-helper uninstall callback may delete profile data"

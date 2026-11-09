@@ -4,7 +4,7 @@
 
 如果你也需要一个这样的学习环境，可以试试。
 
-[下载最新版](https://github.com/ai-lcs/focus-desktop/releases/latest) · [1.2.5 更新说明](docs/releases/v1.2.5.md)
+[下载最新版](https://github.com/ai-lcs/focus-desktop/releases/latest) · [2.0.0 更新说明](docs/releases/v2.0.0.md)
 
 ## 用起来是什么样
 
@@ -23,13 +23,13 @@
 
 ## 下载与首次设置
 
-目前提供 Windows x64 版本，最新版是 **1.2.5**。
+目前提供 Windows x64 版本，最新版是 **2.0.0**。
 
 | 下载 | 怎么选 |
 | --- | --- |
-| [安装版](https://github.com/ai-lcs/focus-desktop/releases/download/v1.2.5/FocusDesk-Dock-Setup-1.2.5.exe) | 大多数人选这个，安装后有桌面入口和恢复入口。 |
-| [便携版](https://github.com/ai-lcs/focus-desktop/releases/download/v1.2.5/focus-desk-dock-portable-1.2.5.zip) | 解压到独立文件夹，运行 `focus-desktop.exe`。 |
-| [SHA-256 校验清单](https://github.com/ai-lcs/focus-desktop/releases/download/v1.2.5/dock-v1.2.5-sha256.txt) | 用于核对下载的文件。 |
+| [安装版](https://github.com/ai-lcs/focus-desktop/releases/download/v2.0.0/FocusDesk-Setup-2.0.0.exe) | 大多数人选这个，安装后有桌面入口和恢复入口。 |
+| [便携版](https://github.com/ai-lcs/focus-desktop/releases/download/v2.0.0/focus-desk-portable-2.0.0.zip) | 解压到独立文件夹，运行 `focus-desktop.exe`。 |
+| [SHA-256 校验清单](https://github.com/ai-lcs/focus-desktop/releases/download/v2.0.0/focus-desk-2.0.0-sha256.txt) | 用于核对下载的文件。 |
 
 程序自带 .NET 运行时，网页部分需要 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。安装包没有代码签名，Windows 首次运行可能弹出 SmartScreen 提示；请先确认下载来自本仓库的 Release。
 
@@ -44,7 +44,7 @@
 
 ## 有几件事先说清楚
 
-配置确认后，日常界面不提供修改入口。这是有意的：专注时，我不想再多一个可以反复折腾的设置页。**要重新配置，卸载时选择清除应用数据，再重新安装。** 这会清除配置和网页登录状态，学习文件夹中的资料会保留。默认卸载保留应用数据，所以仅卸载再装，并不会自动重置配置。
+配置确认后，日常界面不提供修改入口。这是有意的：专注时，我不想再多一个可以反复折腾的设置页。**要重新配置，卸载后重新安装。** 这会清除配置和网页登录状态，学习文件夹中的资料会保留。卸载会直接清除配置、网页登录状态和日志，不再询问是否保留数据。
 
 软件栏提供的是你选定软件的入口。外部软件仍可能通过链接、终端等方式打开其他程序或网页；Focus Desk 无法把整台电脑变成严格的软件白名单环境。同一 exe 或 AppUserModelID 只保留一个入口，也不保证按不同启动参数切到特定项目或文档。
 
@@ -52,13 +52,13 @@
 
 ## 更新、数据和恢复
 
-**安装版更新：** 正常退出 Focus Desk 后，运行新版安装包。1.2.x 安装版的数据在 `%LOCALAPPDATA%\focus-desktop-dock`，升级前可以备份这个目录。
+**安装版更新：** 正常退出 Focus Desk 后，运行新版安装包。安装版沿用 1.2.x 的数据路径，数据在 `%LOCALAPPDATA%\focus-desktop-dock`，升级前可以备份这个目录。
 
 **便携版更新：** 退出程序及其网页进程，备份原文件夹，再把新版解压到独立目录。需要保留数据时，只迁移同一产品线的 `focus-desktop-data`；不要复制 `session_state.json` 等恢复标记。
 
 1.0.x 旧版的安装身份和数据目录独立，当前版本不会自动迁移 `%LOCALAPPDATA%\focus-desktop` 中的数据。不要覆盖旧版目录，也不要同时运行两版专注或恢复助手。历史版本仍可从 Git 标签和 Releases 找到，后续开发集中在 `master`。
 
-如果异常退出后任务栏没有回来，先关闭 Focus Desk，运行开始菜单中的“Focus Desk Dock 恢复”。便携版在对应目录运行：
+如果异常退出后任务栏没有回来，先关闭 Focus Desk，运行开始菜单中的“Focus Desk 恢复”。便携版在对应目录运行：
 
 ```powershell
 .\focus-desktop.exe --restore
@@ -80,6 +80,6 @@ dotnet run --project .\src\focus-desktop -- --dockselftest
 powershell -ExecutionPolicy Bypass -File .\installer\build-release.ps1
 ```
 
-测试方法与限制见 [tests/README.md](tests/README.md)，本版复查见 [1.2.5 验证记录](docs/acceptance/v1.2.5-2026-11-09.md)。桌面和安装测试会影响系统状态，请先读说明；历史安装脚本不适合直接在日常使用的电脑上运行。
+测试方法与限制见 [tests/README.md](tests/README.md)，本版复查见 [2.0.0 验证记录](docs/acceptance/v2.0.0-2026-11-09.md)。桌面和安装测试会影响系统状态，请先读说明；历史安装脚本不适合直接在日常使用的电脑上运行。
 
 [MIT License](LICENSE) · [第三方组件说明](THIRD_PARTY_NOTICES.md)

@@ -4,15 +4,15 @@
 ; 关键语义：
 ;  - 新版独立装到 {autopf}\FocusDeskDock；运行数据落 %LOCALAPPDATA%\focus-desktop-dock
 ;  - 升级：仅新版自身固定 AppId，不复用旧版身份；拒绝覆盖未标记或便携目录
-;  - 卸载：默认保留新版数据；仅在用户明确同意且应用证明账户归属后清除
+;  - 卸载：清除当前账户的应用数据；由应用证明账户归属后清除
 ;           清理由持有桌面与数据目录锁的应用 helper 完成；身份或锁无法确认时中止清除
 ;  - 快捷方式：桌面 + 开始菜单；「恢复」入口指向 --restore
 
-#define AppName "Focus Desk Dock"
+#define AppName "Focus Desk"
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
 #ifndef Version
-#define Version "1.2.5"
+#define Version "2.0.0"
 #endif
 #ifndef PayloadDir
 #define PayloadDir "payload"
@@ -27,11 +27,12 @@ AppVerName={#AppName} {#Version}
 AppPublisher={#Publisher}
 AppPublisherURL=https://github.com/ai-lcs/focus-desktop
 AppSupportURL=https://github.com/ai-lcs/focus-desktop/issues
-DefaultDirName={autopf}\FocusDeskDock
+DefaultDirName={autopf}\FocusDesk
 DefaultGroupName={#AppName}
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 OutputDir=..\release\
-OutputBaseFilename=FocusDesktop-Setup-{#Version}
+OutputBaseFilename=FocusDesk-Setup-{#Version}
 SetupIconFile=..\assets\focus.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -62,19 +63,23 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Comment: "{#AppNameZh}"
 Name: "{group}\{#AppName} 恢复"; Filename: "{app}\{#AppExeName}"; Parameters: "--restore"; WorkingDir: "{app}"; Comment: "任务栏丢失/异常退出后双击恢复"
 
+[InstallDelete]
+Type: files; Name: "{autodesktop}\Focus Desk Dock.lnk"
+Type: files; Name: "{autoprograms}\Focus Desk Dock\Focus Desk Dock.lnk"
+Type: files; Name: "{autoprograms}\Focus Desk Dock\Focus Desk Dock 恢复.lnk"
+Type: dirifempty; Name: "{autoprograms}\Focus Desk Dock"
+
 [Run]
 ; 让实际运行账户的程序判断是否首次配置，不能用提权 Setup 账户的 LocalAppData 代替。
 ; 不使用 postinstall：它只是完成页上的可选复选框，用户取消后不会启动首次配置。
 Filename: "{app}\{#AppExeName}"; Parameters: "--first-run-if-needed"; Flags: nowait runasoriginaluser
 
 [UninstallDelete]
-; 这里只清理安装目录中的程序文件；用户数据只由显式选择后的持锁 helper 处理。
+; 这里只清理安装目录中的程序文件；用户数据由持锁 helper 处理。
 Type: files; Name: "{app}\{#AppExeName}"
 Type: files; Name: "{app}\focus-desktop-watchdog.exe"
 
 [Code]
-var
-  RemoveUserData: Boolean;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
@@ -102,22 +107,9 @@ var
   ErrorMessage: String;
   PrepareArguments: String;
 begin
-  // 默认保留数据；清理仅在明确选择后交给应用 helper，并由 helper 在锁内复核账户与数据目录。
-  RemoveUserData := False;
-  if HasUninstallParam('REMOVEUSERDATA') then
-    RemoveUserData := True
-  else if not IsUnattendedUninstall() then
-    RemoveUserData := MsgBox(
-      '是否删除当前账户的 Focus Desk 用户数据（配置、网站登录态）？' + #13#10 +
-      '「否」= 仅卸载程序、保留数据（默认）；「是」= 请求清理。' + #13#10 +
-      '只有能确认数据属于当前交互账户时才会删除；账户不明或数据正在使用时会保留数据并中止卸载。',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
-
   // 不使用 [UninstallRun]：它会等待进程，但不能在 Pascal 事件中据其退出码中止卸载。
   // 用户数据若获准清除，必须由 helper 持有桌面锁和数据目录锁完成；Inno 不在 helper 退出后清目录。
-  PrepareArguments := '--prepare-uninstall';
-  if RemoveUserData then
-    PrepareArguments := PrepareArguments + ' --remove-user-data';
+  PrepareArguments := '--prepare-uninstall --remove-user-data';
   Executed := Exec(
       ExpandConstant('{app}\{#AppExeName}'),
     PrepareArguments,
@@ -131,10 +123,8 @@ begin
     begin
       if ResultCode = 2 then
         ErrorMessage := '用户数据清理未完成，可能已部分清除。卸载已中止，请检查数据目录并从自己的备份恢复。'
-      else if RemoveUserData then
-        ErrorMessage := 'Focus Desk 未能证明当前账户拥有该数据，或无法安全完成卸载准备（退出代码 ' + IntToStr(ResultCode) + '）。'
       else
-        ErrorMessage := 'Focus Desk 未能安全完成卸载准备（退出代码 ' + IntToStr(ResultCode) + '）。';
+        ErrorMessage := 'Focus Desk 未能验证当前账户的数据归属，或数据仍在使用，无法完成清理（退出代码 ' + IntToStr(ResultCode) + '）。';
     end
     else
       ErrorMessage := '无法运行 Focus Desk 卸载准备程序：' + SysErrorMessage(ResultCode);
