@@ -283,6 +283,8 @@
                 <Button x:Name="BackButton" Grid.Column="0" Style="{StaticResource WzFooterBtn}" Content="← 返回上一步" AutomationProperties.AutomationId="SetupBackButton"
                         Padding="18,9" HorizontalAlignment="Left" Click="Back_Click" IsEnabled="False"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="SkipAppsButton" Style="{StaticResource WzFooterBtn}" Content="跳过软件，仅使用学习桌面"
+                            Visibility="Collapsed" Margin="0,0,12,0" Click="SkipApps_Click" AutomationProperties.AutomationId="SetupSkipAppsButton"/>
                     <Button x:Name="PreviewButton" Style="{StaticResource WzFooterBtn}" Content="预览首页" AutomationProperties.AutomationId="SetupPreviewButton"
                             MinWidth="104" Click="Preview_Click"/>
                     <Button x:Name="PrimaryButton" Style="{StaticResource WzPrimaryBtn}" Content="下一步" AutomationProperties.AutomationId="SetupNextButton"

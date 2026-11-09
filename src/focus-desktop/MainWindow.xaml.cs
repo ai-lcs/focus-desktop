@@ -54,6 +54,7 @@ public partial class MainWindow : Window
         MainLayout.Children.Remove(PersistentHeader);
         MainLayout.RowDefinitions[0].Height = new GridLength(0);
         _headerDetached = true;
+        InlineClockRegion.Visibility = Visibility.Collapsed;
         return PersistentHeader;
     }
 
@@ -63,6 +64,7 @@ public partial class MainWindow : Window
         MainLayout.Children.Add(PersistentHeader);
         MainLayout.RowDefinitions[0].Height = new GridLength(44);
         _headerDetached = false;
+        InlineClockRegion.Visibility = Visibility.Visible;
     }
 
     public MainWindow(AppOptions options, FocusModeService focus)
@@ -120,14 +122,16 @@ public partial class MainWindow : Window
         {
             var now = DateTime.Now;
             BigClock.Text = now.ToString("HH:mm");
+            InlineClock.Text = now.ToString("HH:mm");
             ClockDate.Text = now.ToString("M月d日 dddd");
-            TopClock.Text = now.ToString("HH:mm");
+            UpdatePowerStatus();
         };
         _clock.Start();
         var n = DateTime.Now;
         BigClock.Text = n.ToString("HH:mm");
+        InlineClock.Text = n.ToString("HH:mm");
         ClockDate.Text = n.ToString("M月d日 dddd");
-        TopClock.Text = n.ToString("HH:mm");
+        UpdatePowerStatus();
 
         // 自由计时器 tick
         _timer.Tick += (_, _) =>
@@ -266,6 +270,30 @@ public partial class MainWindow : Window
     }
 
     internal void PrepareForExternalWindow() => Topmost = false;
+
+    internal void ShowHome() => ActivateTab("home");
+
+    private void UpdatePowerStatus()
+    {
+        var power = Forms.SystemInformation.PowerStatus;
+        TopPower.Text = FormatPowerStatus(power.BatteryChargeStatus, power.PowerLineStatus, power.BatteryLifePercent);
+        var hasBattery = power.BatteryChargeStatus != Forms.BatteryChargeStatus.Unknown
+            && !power.BatteryChargeStatus.HasFlag(Forms.BatteryChargeStatus.NoSystemBattery);
+        BatteryIcon.Visibility = hasBattery ? Visibility.Visible : Visibility.Collapsed;
+        BatteryFill.Width = hasBattery && power.BatteryLifePercent is >= 0 and <= 1
+            ? 16 * power.BatteryLifePercent : 0;
+    }
+
+    internal static string FormatPowerStatus(Forms.BatteryChargeStatus flags, Forms.PowerLineStatus line, float percent)
+    {
+        if (flags == Forms.BatteryChargeStatus.Unknown)
+            return "电源未知";
+        if (flags.HasFlag(Forms.BatteryChargeStatus.NoSystemBattery))
+            return "交流供电";
+        if (percent is >= 0 and <= 1)
+            return $"{(line == Forms.PowerLineStatus.Online ? "⚡ " : "")}{Math.Round(percent * 100)}%";
+        return "电量未知";
+    }
 
     internal void ReturnToFocusDesk()
     {
@@ -728,11 +756,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>"+"新建 Tab：弹出站点选择浮层（数据源 = 解析后的站点集，数据驱动）。</summary>
-    private void ShowNewTabMenu()
+    private Popup ShowNewTabMenu()
     {
         var menu = new Popup
         {
-            PlacementTarget = TabBar,
+            PlacementTarget = _addTabBtn,
             Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
             StaysOpen = false,
             AllowsTransparency = true,
@@ -771,6 +799,7 @@ public partial class MainWindow : Window
         list.Child = sp;
         menu.Child = list;
         menu.IsOpen = true;
+        return menu;
     }
 
     /// <summary>开一个新站 Tab（preset 同站可多开：GPT 两个、B站 三个…；custom 单例——

@@ -209,6 +209,15 @@ public sealed class ExternalAppWindowService : IDisposable
 
     public event Action<long, long>? ActiveExternalWindowUnavailable;
 
+    internal string? ForegroundEntryId
+    {
+        get
+        {
+            var hwnd = GetForegroundWindow();
+            lock (_windowStateGate) return _knownWindows.Contains(hwnd) ? _activeEntryId : null;
+        }
+    }
+
     public static bool IdentityMatches(ExternalAppEntry entry, ExternalWindowIdentity identity)
     {
         ArgumentNullException.ThrowIfNull(entry);
@@ -219,7 +228,8 @@ public sealed class ExternalAppWindowService : IDisposable
         }
 
         return !string.Equals(entry.Kind, ExternalAppEntry.PackagedAppKind, StringComparison.Ordinal)
-            && PathsEqual(entry.ExecutablePath, identity.ExecutablePath);
+            && entry.ExecutablePath != null
+            && PathsEqual(ExternalAppEntry.WindowExecutablePath(entry.ExecutablePath), identity.ExecutablePath);
     }
 
     public static bool MatchesOwnerChain(ExternalAppEntry entry, IReadOnlyList<ExternalWindowIdentity> ownerChain)

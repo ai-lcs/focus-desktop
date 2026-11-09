@@ -59,6 +59,11 @@ public static class DockSelfTest
                 Paths.InstalledDataDirectoryName == "focus-desktop-dock");
             CheckFullScreenLayout(Check);
             CheckIdentityMatching(Check);
+            Check("desktop without battery shows AC power", MainWindow.FormatPowerStatus(System.Windows.Forms.BatteryChargeStatus.NoSystemBattery, System.Windows.Forms.PowerLineStatus.Online, 1) == "交流供电");
+            Check("unknown battery flags do not imply no battery", MainWindow.FormatPowerStatus(System.Windows.Forms.BatteryChargeStatus.Unknown, System.Windows.Forms.PowerLineStatus.Unknown, 1) == "电源未知");
+            Check("battery percentage is shown", MainWindow.FormatPowerStatus(System.Windows.Forms.BatteryChargeStatus.High, System.Windows.Forms.PowerLineStatus.Offline, .75f) == "75%");
+            Check("AC battery includes power indicator", MainWindow.FormatPowerStatus(System.Windows.Forms.BatteryChargeStatus.Charging, System.Windows.Forms.PowerLineStatus.Online, .5f) == "⚡ 50%");
+            Check("invalid percentage is not shown as 100 percent", MainWindow.FormatPowerStatus(System.Windows.Forms.BatteryChargeStatus.High, System.Windows.Forms.PowerLineStatus.Offline, -1) == "电量未知");
             Task.Run(() =>
             {
                 CheckIntentAndLaunchBoundaries(Check);

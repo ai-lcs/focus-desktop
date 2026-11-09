@@ -12,7 +12,7 @@
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
 #ifndef Version
-#define Version "1.2.4"
+#define Version "1.2.5"
 #endif
 #ifndef PayloadDir
 #define PayloadDir "payload"

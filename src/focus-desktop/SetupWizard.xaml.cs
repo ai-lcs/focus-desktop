@@ -257,6 +257,7 @@ public partial class SetupWizard : Window
         BackButton.IsEnabled = step > 1;
         BackButton.Opacity = step > 1 ? 1.0 : 0.4;
         PrimaryButton.Content = step == 4 ? "完成并开始使用" : "下一步";
+        SkipAppsButton.Visibility = step == 4 ? Visibility.Visible : Visibility.Collapsed;
         PrimaryButton.IsEnabled = step != 4 || ExternalAppsPicker.IsReady;
     }
 
@@ -542,9 +543,11 @@ public partial class SetupWizard : Window
 
     // ---------------- 完成并开始使用（原子提交） ----------------
 
-    private void CommitAndFinish()
+    private void SkipApps_Click(object sender, RoutedEventArgs e) => CommitAndFinish(skipApps: true);
+
+    private void CommitAndFinish(bool skipApps = false)
     {
-        if (!ExternalAppsPicker.IsReady)
+        if (!skipApps && !ExternalAppsPicker.IsReady)
         {
             ExternalAppsError.Text = "应用入口仍在扫描或解析，请等待完成后再确认。";
             ExternalAppsError.Visibility = Visibility.Visible;
@@ -578,7 +581,7 @@ public partial class SetupWizard : Window
             BackgroundImage = null, // v1.0.2 背景图功能已移除（用户指示）：字段保留兼容旧 config 读取，不再写入
             Sites = new List<SiteCatalog.SiteEntry>(),
             ExternalAppsConfirmed = true,
-            ExternalApps = ExternalAppsPicker.GetSelectedEntries(),
+            ExternalApps = skipApps ? new List<ExternalAppEntry>() : ExternalAppsPicker.GetSelectedEntries(),
         };
         // 勾选的 preset（只存 id，域名真相在代码）+ 自定义条目（草稿里已含全字段）
         foreach (var id in SiteCatalog.DefaultPresetIds)

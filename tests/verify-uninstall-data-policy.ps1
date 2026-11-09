@@ -27,7 +27,9 @@ Assert-NotContains $installer 'AppId=\{\{7B3F9E2A' "legacy installation identity
 Assert-Contains $installer 'DefaultDirName=\{autopf\}\\FocusDeskDock' "Dock uses a separate default install directory"
 Assert-Contains $installer 'function PrepareToInstall' "existing unmarked or portable installations are rejected"
 Assert-Contains $installer 'dock-install.identity' "new installation carries its own marker"
-Assert-Contains $installer '#define Version "1\.2\.4"' "candidate Setup fallback version is 1.2.4"
+[xml]$projectXml = Get-Content -Raw -LiteralPath (Join-Path $RepositoryRoot 'src\focus-desktop\focus-desktop.csproj')
+$expectedVersion = [regex]::Escape([string]$projectXml.Project.PropertyGroup.Version)
+Assert-Contains $installer ('#define Version "' + $expectedVersion + '"') "Setup fallback version matches the application"
 Assert-Contains $installer 'Parameters:\s*"--first-run-if-needed";\s*Flags: nowait runasoriginaluser' "first-run eligibility is evaluated after launch as the actual user"
 Assert-NotContains $installer "ShouldLaunchFirstRun|LocalAppDataPath" "Setup does not guess the data owner from its elevated account"
 Assert-Contains $app 'e.Args.Contains\("--first-run-if-needed"' "app processes the original-user first-run gate"

@@ -132,7 +132,26 @@ public sealed class ExternalAppEntry
             || string.IsNullOrWhiteSpace(other.ExecutablePath))
             return false;
 
-        return SameNormalizedPath(ExecutablePath, other.ExecutablePath);
+        return SameNormalizedPath(WindowExecutablePath(ExecutablePath), WindowExecutablePath(other.ExecutablePath));
+    }
+
+    // 学习通的桌面入口是启动器；实际 Electron 窗口由 latest 下的同名程序创建。
+    // 保留原启动定义，只为已核对的安装布局解析窗口身份。
+    internal static string WindowExecutablePath(string executablePath)
+    {
+        if (!string.Equals(Path.GetFileName(executablePath), "cxstudy.exe", StringComparison.OrdinalIgnoreCase))
+            return executablePath;
+        var target = Path.Combine(Path.GetDirectoryName(executablePath)!, "latest", "cxstudy.exe");
+        if (!File.Exists(target) || !File.Exists(executablePath)) return executablePath;
+        try
+        {
+            if (System.Diagnostics.FileVersionInfo.GetVersionInfo(executablePath).ProductName == "学习通"
+                && System.Diagnostics.FileVersionInfo.GetVersionInfo(target).ProductName == "学习通")
+                return target;
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return executablePath;
     }
 
     public static ExternalAppEntry? FindWindowMatchIdentityConflict(

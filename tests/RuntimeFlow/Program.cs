@@ -134,6 +134,41 @@ internal sealed class RuntimeApp : System.Windows.Application
             main = new MainWindow(new AppOptions(true, false, false, true), focus);
             main.Show();
             Console.WriteLine("RuntimeFlow: main window shown");
+            if (e.Args.Contains("--skip-apps"))
+            {
+                var wizard = new SetupWizard(settings, main);
+                wizard.Show();
+                Call(wizard, "GoToStep", 4);
+                var skip = (System.Windows.Controls.Button)Field(wizard, "SkipAppsButton")!;
+                if (skip.Visibility != Visibility.Visible || !skip.IsEnabled) throw new Exception("Skip apps is not available");
+                if (e.Args.Contains("--observe")) await Task.Delay(30000);
+                skip.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                var saved = AppSettings.LoadOrDefault();
+                if (!saved.IsConfigured() || saved.ExternalAppsConfirmed != true || saved.ExternalApps?.Count != 0)
+                    throw new Exception("Skip apps did not freeze an empty application list");
+                focus.ConfigureDock(main, saved.ExternalApps, formal);
+                if (formal)
+                {
+                    if (!DesktopSessionCoordinator.TryAcquire(out desktopLease, out var skipReason)) throw new Exception(skipReason);
+                    await focus.EnterAsync();
+                    if (!focus.IsActive || IsWindowVisible(FindWindow("Shell_TrayWnd", null)))
+                        throw new Exception("No-Dock focus did not hide the taskbar");
+                    focus.Exit();
+                    if (focus.HasRecoveryResponsibility || !IsWindowVisible(FindWindow("Shell_TrayWnd", null))
+                        || originalTaskbarState != (int)typeof(TaskbarService).GetMethod("ReadShellState", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!
+                        || (GetWindowLongPtr(FindWindow("Shell_TrayWnd", null), -20).ToInt64() & 0x80000) != originalTaskbarLayered)
+                        throw new Exception("No-Dock exit did not restore the taskbar state");
+                    Console.WriteLine("PASS no-Dock formal focus and taskbar recovery");
+                }
+                if (!focus.ShowDevelopmentDock(false) || Field(focus, "_dock") != null)
+                    throw new Exception("Empty application list created a Dock");
+                var clockRegion = (FrameworkElement)Field(main, "InlineClockRegion")!;
+                if (clockRegion.Visibility != Visibility.Visible || clockRegion.Width != 96 || clockRegion.Height != 44)
+                    throw new Exception("No-Dock clock region is missing or misaligned");
+                Console.WriteLine("PASS wizard skip freezes empty list; no Dock; top-left clock retained");
+                Result = 0;
+                return;
+            }
             WebTabService? web = null;
             for (var attempt = 0; attempt < 300; attempt++)
             {
@@ -162,7 +197,8 @@ internal sealed class RuntimeApp : System.Windows.Application
             var existingPath = e.Args.FirstOrDefault(arg => arg.StartsWith("--existing-app="))?[15..];
             var fixturePath = existingPath ?? Path.Combine(AppContext.BaseDirectory, "FlowFixture.exe");
             if (existingPath == null) File.Copy(Environment.ProcessPath!, fixturePath, true);
-            var fixtureEntry = ExternalAppCatalog.Resolve(fixturePath);
+            var entryPath = e.Args.FirstOrDefault(arg => arg.StartsWith("--entry-executable="))?[19..];
+            var fixtureEntry = ExternalAppCatalog.Resolve(entryPath ?? fixturePath);
             if (existingPath == null)
             {
                 externalFixture = Process.Start(new ProcessStartInfo(fixturePath) { UseShellExecute = false, Arguments = Environment.ProcessId.ToString() + (e.Args.Contains("--edge-input") ? " --edge-input" : "") });
@@ -205,6 +241,30 @@ internal sealed class RuntimeApp : System.Windows.Application
             try
             {
                 if (!formal && !(bool)Call(dock, "TryShowDock", false)!) throw new Exception("Dock registration failed");
+                Call(main, "ActivateTab", web.Tabs[0].Id);
+                Call(dock, "ReturnHome");
+                var returnButton = (System.Windows.Controls.Button)Field(dock, "_returnButton")!;
+                if (System.Windows.Automation.AutomationProperties.GetItemStatus(returnButton) != "当前使用")
+                    throw new Exception("Return button has no active indication");
+                var dockRoot = (System.Windows.Controls.Grid)dock.Content;
+                var clockCell = (FrameworkElement)dockRoot.Children[0];
+                if (clockCell.ActualHeight != 44 || clockCell.ActualWidth != dock.ActualWidth)
+                    throw new Exception("Clock cell does not align with the top/side bars");
+                if (((FrameworkElement)Field(main, "InlineClockRegion")!).Visibility != Visibility.Collapsed)
+                    throw new Exception("Clock duplicated while Dock is present");
+                if ((string)Field(main, "_activeTab")! != "home") throw new Exception("Dock return button did not navigate home");
+                Call(main, "ActivateTab", web.Tabs[1].Id);
+                var menu = (System.Windows.Controls.Primitives.Popup)Call(main, "ShowNewTabMenu")!;
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                var addButton = (System.Windows.Controls.Button)Field(main, "_addTabBtn")!;
+                if (!ReferenceEquals(menu.PlacementTarget, addButton)) throw new Exception("New-tab menu is not anchored to +");
+                var buttonPoint = addButton.PointToScreen(new System.Windows.Point(0, addButton.ActualHeight));
+                var menuPoint = menu.Child.PointToScreen(new System.Windows.Point(0, 0));
+                if (Math.Abs(menuPoint.X - buttonPoint.X) > 4 || Math.Abs(menuPoint.Y - buttonPoint.Y) > 4)
+                    throw new Exception($"New-tab menu position differs from +: {menuPoint} vs {buttonPoint}");
+                Console.WriteLine("PASS Dock return navigates home; new-tab menu opens directly beneath +");
+                if (e.Args.Contains("--observe-menu")) await Task.Delay(30000);
+                menu.IsOpen = false;
                 if (e.Args.Contains("--edge-input"))
                 {
                     File.WriteAllText(Path.Combine(Paths.DataDir, "edge-main-ready"), Environment.ProcessId.ToString());
@@ -217,7 +277,7 @@ internal sealed class RuntimeApp : System.Windows.Application
                 HardFocus.Enable(true);
                 lastTick = Stopwatch.GetTimestamp();
                 heartbeat.Start();
-                for (var cycle = 0; cycle < 40; cycle++)
+                for (var cycle = 0; cycle < (entryPath == null ? 40 : 1); cycle++)
                 {
                     foreach (var id in new[] { web.Tabs[0].Id, web.Tabs[1].Id, "files", "home" })
                     {
@@ -240,17 +300,28 @@ internal sealed class RuntimeApp : System.Windows.Application
                                 throw new Exception($"Native fixture activation failed: mainActive={main.IsActive}, dockActive={dock.IsActive}; " + ((System.Windows.Controls.TextBlock)Field(dock, "_status")!).Text
                                     + "; " + Field(Field(dock, "_windows")!, "_layout")!.GetType().GetProperty("LastFailure", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Field(Field(dock, "_windows")!, "_layout")));
                             externalFixture!.Refresh();
+                            var entryButtons = (Dictionary<string, System.Windows.Controls.Button>)Field(dock, "_entryButtons")!;
+                            if (System.Windows.Automation.AutomationProperties.GetItemStatus(entryButtons[fixtureEntry.Id]) != "当前使用"
+                                || System.Windows.Automation.AutomationProperties.GetItemStatus(returnButton) != "")
+                                throw new Exception("Sidebar active indication does not follow application switching");
                             var topBar = (Window)Field(dock, "_topBar")!;
                             if (!GetWindowRect(new WindowInteropHelper(topBar).Handle, out var topRect)
                                 || DwmGetWindowAttribute(GetForegroundWindow(), 9, out var appRect, Marshal.SizeOf<NativeRect>()) != 0)
                                 throw new Exception("External visible frame not available");
                             var screen = System.Windows.Forms.Screen.PrimaryScreen!.Bounds;
-                            if (appRect.Left != topRect.Left || appRect.Top != topRect.Bottom
-                                || appRect.Right != screen.Right || appRect.Bottom != screen.Bottom)
+                            if (formal && (appRect.Left != topRect.Left || appRect.Top != topRect.Bottom
+                                || appRect.Right != screen.Right || appRect.Bottom != screen.Bottom))
                                 throw new Exception($"External frame leaves gap: {appRect.Left},{appRect.Top},{appRect.Right},{appRect.Bottom}");
                             var topWindow = (Window)Field(dock, "_topBar")!;
                             if (!topWindow.IsVisible || !topWindow.Topmost || !dock.Topmost) throw new Exception("Persistent bars disappeared");
                             externalSwitches.Add(Stopwatch.GetElapsedTime(externalStart).TotalMilliseconds);
+                            if (entryPath != null)
+                            {
+                                await Task.Delay(15000);
+                                if (!((ExternalAppWindowService)Field(dock, "_windows")!).IsExternalWindowForeground)
+                                    throw new Exception("Launcher application lost window identity after 15 seconds");
+                                Console.WriteLine("PASS launcher entry reused actual application window and retained identity for 15 seconds");
+                            }
                             if (cycle == 0 && formal && e.Args.Contains("--reveal-regression"))
                             {
                                 heartbeat.Stop();
@@ -287,7 +358,16 @@ internal sealed class RuntimeApp : System.Windows.Application
                 if (!(bool)Field(main, "_timerRunning")! || !Equals(phaseStart, Field(main, "_phaseStart")) || !HardFocus.Active)
                     throw new Exception("Timer or Hard Focus state changed during switching");
             }
-            finally { if (formal) focus.Exit(); else dock.Close(); }
+            finally
+            {
+                if (formal) focus.Exit();
+                else
+                {
+                    dock.Close();
+                    // Development Dock does not fit/track external placements; undo test activation itself.
+                    if (!ownsFixture) SetWindowPlacement(externalFixture!.MainWindowHandle, ref originalPlacement);
+                }
+            }
             if (formal && (!IsWindowVisible(FindWindow("Shell_TrayWnd", null)) || focus.HasRecoveryResponsibility))
                 throw new Exception("Formal taskbar/AppBar recovery was not confirmed");
             if (formal && originalTaskbarState != (int)typeof(TaskbarService).GetMethod("ReadShellState", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!)
@@ -384,6 +464,7 @@ internal sealed class RuntimeApp : System.Windows.Application
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", ExactSpelling = true)] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] private static extern bool GetWindowPlacement(IntPtr hwnd, ref NativePlacement placement);
+    [DllImport("user32.dll")] private static extern bool SetWindowPlacement(IntPtr hwnd, ref NativePlacement placement);
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct NativePlacement { public int Length, Flags, ShowCommand; public NativePoint Min, Max; public NativeRect NormalPosition; }
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out NativeRect rect, int size);

@@ -25,6 +25,9 @@ internal sealed class DockWindow : Window
     private readonly ExternalAppWindowService _windows;
     private readonly AppBarWindowService _appBar;
     private readonly TextBlock _status;
+    private readonly Dictionary<string, WpfButton> _entryButtons = new();
+    private readonly WpfButton _returnButton;
+    private readonly System.Windows.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
     private bool _isClosed;
     private int _registrationFailureQueued;
 
@@ -79,29 +82,31 @@ internal sealed class DockWindow : Window
         Foreground = new WpfSolidColorBrush(WpfColor.FromRgb(237, 240, 246));
         UseLayoutRounding = true;
 
-        var root = new Grid { Margin = new Thickness(6, 10, 6, 8) };
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(44) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-        header.Children.Add(new TextBlock
+        var header = new StackPanel { Margin = new Thickness(6, 0, 6, 10) };
+        var clock = new TextBlock
         {
-            Text = "应用 Dock",
-            FontSize = 13,
+            Text = DateTime.Now.ToString("HH:mm"),
+            FontSize = 18,
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = TextAlignment.Center,
-        });
-        header.Children.Add(new TextBlock
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var clockRegion = new Border
         {
-            Text = "已确认名单",
-            FontSize = 10,
-            Foreground = new WpfSolidColorBrush(WpfColor.FromRgb(155, 165, 180)),
-            Margin = new Thickness(0, 3, 0, 0),
-            TextWrapping = TextWrapping.Wrap,
-            TextAlignment = TextAlignment.Center,
-        });
+            Height = 44,
+            Background = new WpfSolidColorBrush(WpfColor.FromRgb(38, 41, 46)),
+            BorderBrush = new WpfSolidColorBrush(WpfColor.FromRgb(58, 63, 70)),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = clock,
+        };
+        root.Children.Add(clockRegion);
 
         _status = new TextBlock
         {
@@ -113,18 +118,20 @@ internal sealed class DockWindow : Window
         };
 
         var returnButton = CreateButton("返回 Focus Desk", emphasized: true);
+        _returnButton = returnButton;
         returnButton.Margin = new Thickness(0, 8, 0, 0);
-        returnButton.Click += (_, _) => ReturnToFocusDesk();
+        returnButton.Click += (_, _) => ReturnHome();
         header.Children.Add(returnButton);
-        Grid.SetRow(header, 0);
+        Grid.SetRow(header, 1);
         root.Children.Add(header);
 
-        var list = new StackPanel();
+        var list = new StackPanel { Margin = new Thickness(6, 0, 6, 0) };
         foreach (var entry in entries.OrderBy(item => item.Order))
         {
             var button = CreateButton(entry.DisplayName, emphasized: false);
             button.Margin = new Thickness(0, 0, 0, 6);
             button.Click += async (_, _) => await ActivateEntryAsync(entry);
+            _entryButtons.Add(entry.Id, button);
             list.Children.Add(button);
         }
 
@@ -134,10 +141,11 @@ internal sealed class DockWindow : Window
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
-        Grid.SetRow(scroll, 1);
+        Grid.SetRow(scroll, 2);
         root.Children.Add(scroll);
 
-        Grid.SetRow(_status, 2);
+        _status.Margin = new Thickness(6, 10, 6, 8);
+        Grid.SetRow(_status, 3);
         root.Children.Add(_status);
         Content = root;
 
@@ -157,9 +165,18 @@ internal sealed class DockWindow : Window
             throw;
         }
 
+        SelectEntry(null);
+        _clock.Tick += (_, _) =>
+        {
+            clock.Text = DateTime.Now.ToString("HH:mm");
+            if (_windows.ForegroundEntryId is { } id) SelectEntry(id);
+        };
+        _clock.Start();
+
         Closed += (_, _) =>
         {
             _isClosed = true;
+            _clock.Stop();
             _main.PersistentNavigationRequested -= ReturnToFocusDesk;
             _topBar?.Release();
             _appBar.RegistrationLost -= OnRegistrationLost;
@@ -219,12 +236,14 @@ internal sealed class DockWindow : Window
         if (!_windows.IsCurrentIntent(intent)) return;
         if (result.Activated)
         {
+            SelectEntry(entry.Id);
             _status.Text = "";
             return;
         }
 
         if (result.Superseded) return;
         _status.Text = result.Error ?? "无法切换到此应用。";
+        SelectEntry(null);
         _main.ReturnToFocusDesk();
     }
 
@@ -232,10 +251,33 @@ internal sealed class DockWindow : Window
     {
         _windows.CancelRequests();
         _status.Text = "";
+        SelectEntry(null);
         _main.ReturnToFocusDesk();
         Topmost = true;
         SetWindowPos(new WindowInteropHelper(this).Handle, HwndTopmost, 0, 0, 0, 0,
             SwpNoActivate | SwpNoOwnerZOrder | SwpNoMove | SwpNoSize);
+    }
+
+    private void ReturnHome()
+    {
+        ReturnToFocusDesk();
+        _main.ShowHome();
+    }
+
+    private void SelectEntry(string? id)
+    {
+        foreach (var (entryId, button) in _entryButtons)
+            ApplySelection(button, entryId == id);
+        ApplySelection(_returnButton, id == null);
+    }
+
+    private static void ApplySelection(WpfButton button, bool selected)
+    {
+        button.Background = new WpfSolidColorBrush(selected
+            ? WpfColor.FromRgb(59, 111, 196) : WpfColor.FromRgb(42, 49, 60));
+        button.BorderBrush = new WpfSolidColorBrush(selected
+            ? WpfColor.FromRgb(135, 181, 255) : WpfColor.FromRgb(67, 77, 92));
+        System.Windows.Automation.AutomationProperties.SetItemStatus(button, selected ? "当前使用" : "");
     }
 
     private void OnRegistrationLost(string reason)
@@ -265,6 +307,7 @@ internal sealed class DockWindow : Window
         Dispatcher.BeginInvoke(new Action(() =>
         {
             if (_isClosed || !_windows.IsCurrentUnavailable(revision, intent)) return;
+            SelectEntry(null);
             _main.ReturnToFocusDesk();
         }));
     }
