@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private bool _recoveryExitDone;
     internal event Action? PersistentNavigationRequested;
     private bool _headerDetached;
+    private readonly SystemControls _systemControls;
 
     internal FrameworkElement DetachHeader()
     {
@@ -72,6 +73,8 @@ public partial class MainWindow : Window
         _options = options;
         _focus = focus;
         InitializeComponent();
+        _systemControls = new SystemControls();
+        SystemControlsHost.Child = _systemControls.Launchers;
         WindowTransitions.Disable(this);
         TabBar.PreviewMouseLeftButtonDown += (_, _) => { if (_headerDetached) PersistentNavigationRequested?.Invoke(); };
         ExitButton.PreviewMouseLeftButtonDown += (_, _) => { if (_headerDetached) PersistentNavigationRequested?.Invoke(); };
@@ -152,34 +155,7 @@ public partial class MainWindow : Window
                 _recoveryExitDone = true;
             }
         };
-        Closed += (_, _) => { try { _web?.Dispose(); } catch { } };
-
-        // 声音：Core Audio 简版（IAudioEndpointVolume）
-        VolumeHelper.Init();
-        _volumeReady = true; // 先置位再设滑块值，避免构造期触发 Set
-        VolumeSlider.Value = VolumeHelper.Get();
-        VolumePct.Text = VolumeHelper.Get().ToString();
-        MuteButton.Content = VolumeHelper.IsMuted() ? SPK_MUTE : SPK;
-
-        // 拖拽会话：按住滑杆期间暂停回读（防打架）
-        VolumeSlider.PreviewMouseLeftButtonDown += (_, _) => _volumeDragging = true;
-        VolumeSlider.PreviewMouseLeftButtonUp += (_, _) => _volumeDragging = false;
-        VolumeSlider.LostMouseCapture += (_, _) => _volumeDragging = false;
-
-        // 音量同步轮询：系统音量被外部改变（键盘/任务栏滑杆）时刷新 UI。
-        // _volumeDragging 标志防打架：用户拖我们的滑杆时跳过回读。
-        var volTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        volTimer.Tick += (_, _) =>
-        {
-            if (_volumeDragging) return;
-            var sys = VolumeHelper.Get();
-            if (Math.Abs(sys - (int)VolumeSlider.Value) >= 1)
-                VolumeSlider.Value = sys; // 触发 ValueChanged → 同步百分比/图标
-            var m = VolumeHelper.IsMuted();
-            var wantIcon = m ? SPK_MUTE : (sys > 0 ? SPK : SPK_MUTE);
-            if ((string)MuteButton.Content != wantIcon) MuteButton.Content = wantIcon;
-        };
-        volTimer.Start();
+        Closed += (_, _) => { _systemControls.Dispose(); _clock.Stop(); _timer.Stop(); try { _web?.Dispose(); } catch { } };
     }
 
     /// <summary>预热调度：启动 0.3s 后隐藏预热全部站（v0.5.2 起预热全程不可见——
@@ -1281,35 +1257,22 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------------- 音量 ----------------
-
-    private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    internal FrameworkElement DetachSystemControls()
     {
-        if (_volumeReady)
-        {
-            VolumeHelper.Set((int)e.NewValue);
-            VolumePct.Text = ((int)e.NewValue).ToString();
-            if (e.NewValue > 0) MuteButton.Content = SPK;
-        }
+        _systemControls.Close();
+        SystemControlsHost.Child = null;
+        _systemControls.AtDock = true;
+        return _systemControls.Launchers;
     }
 
-    private bool _volumeDragging;
-
-    // 拖拽起止（Thumb 事件在模板内，用滑杆的鼠标按下/抬起近似）
-    // PreviewMouseDown/Up 挂在滑杆上：按下即视为拖拽会话开始
-    
-
-    /// <summary>静音/恢复（记住静音前音量）。</summary>
-    private void MuteButton_Click(object sender, RoutedEventArgs e)
+    internal void RestoreSystemControls()
     {
-        var muted = VolumeHelper.ToggleMute();
-        MuteButton.Content = muted ? SPK_MUTE : SPK;
+        _systemControls.Close();
+        _systemControls.AtDock = false;
+        SystemControlsHost.Child = _systemControls.Launchers;
     }
 
-    private const string SPK = "🔊";
-    private const string SPK_MUTE = "🔇";
-
-    private bool _volumeReady;
+    internal void CloseSystemControls() => _systemControls.Close();
 
     // ---------------- 退出验证（Step 6） ----------------
 

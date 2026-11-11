@@ -24,7 +24,7 @@ public static class ExternalAppCatalog
     private static readonly PropertyKey LinkTargetParsingPathKey = new(
         new Guid("B9B4B3FC-2B51-4A42-B5D8-324146AFCF25"), 2);
 
-    /// <summary>Scans both Windows desktop known folders without blocking the WPF dispatcher.</summary>
+    /// <summary>Scans Windows application entries without blocking the WPF dispatcher.</summary>
     public static Task<ExternalAppScanResult> ScanDesktopAsync(CancellationToken cancellationToken = default) =>
         RunOnStaAsync(() => ScanDesktop(cancellationToken), cancellationToken, "External app desktop scan");
 
@@ -135,6 +135,8 @@ public static class ExternalAppCatalog
         var errors = new List<ExternalAppScanError>();
         var desktopFolders = new[]
         {
+            Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu),
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
             Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
         };
@@ -145,7 +147,7 @@ public static class ExternalAppCatalog
             if (!Directory.Exists(folder)) continue;
 
             string[] shortcuts;
-            try { shortcuts = Directory.GetFiles(folder, "*.lnk", SearchOption.TopDirectoryOnly); }
+            try { shortcuts = Directory.GetFiles(folder, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }); }
             catch (Exception ex)
             {
                 errors.Add(new ExternalAppScanError(folder, $"无法读取此桌面目录：{ex.Message}"));
@@ -158,12 +160,14 @@ public static class ExternalAppCatalog
                 try
                 {
                     var entry = ResolveShortcut(shortcut);
+                    if (!IsApplicationEntry(entry)) continue;
                     if (!TryAddScannedEntry(entries, entry, out var identityConflict)) continue;
                     if (identityConflict != null)
                         errors.Add(new ExternalAppScanError(
                             shortcut,
                             identityConflict));
                 }
+                catch (InvalidDataException) { /* Documents, folders and Shell utilities are not app candidates. */ }
                 catch (Exception ex)
                 {
                     errors.Add(new ExternalAppScanError(shortcut, FriendlyError(ex)));
@@ -171,6 +175,8 @@ public static class ExternalAppCatalog
             }
         }
 
+        ScanAppsFolder(entries, errors, cancellationToken);
+        ScanRegisteredApps(entries, errors, cancellationToken);
         var ordered = entries.Values
             .OrderBy(entry => entry.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
@@ -191,9 +197,118 @@ public static class ExternalAppCatalog
 
         var conflict = ExternalAppEntry.FindWindowMatchIdentityConflict(entries.Values, candidate);
         if (conflict != null)
-            identityConflictMessage = ExternalAppEntry.DescribeWindowMatchIdentityConflict(conflict, candidate);
+            return false;
         entries.Add(candidate.Id, candidate);
         return true;
+    }
+
+    internal static bool IsApplicationEntry(ExternalAppEntry entry)
+    {
+        var name = entry.DisplayName.ToLowerInvariant();
+        var executable = Path.GetFileNameWithoutExtension(entry.ExecutablePath ?? "").ToLowerInvariant();
+        return !new[] { "uninstall", "卸载", "驱动", "driver", "runtime", "redistributable", "运行库", "修复", "help", "帮助" }
+            .Any(word => name.Contains(word, StringComparison.Ordinal))
+            && !new[] { "unins", "uninstall", "setup", "vcredist", "msiexec", "rundll32" }
+                .Any(word => executable.StartsWith(word, StringComparison.Ordinal))
+            && !string.Equals(executable, "focus-desktop", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ScanAppsFolder(IDictionary<string, ExternalAppEntry> entries,
+        List<ExternalAppScanError> errors, CancellationToken cancellationToken)
+    {
+        object? shell = null;
+        object? folder = null;
+        object? items = null;
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application", true)!);
+            folder = ((dynamic)shell!).Namespace("shell:AppsFolder");
+            if (folder == null) throw new InvalidOperationException("Windows 应用列表不可用");
+            items = ((dynamic)folder).Items();
+            for (var index = 0; index < (int)((dynamic)items).Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                object? item = null;
+                try
+                {
+                    item = ((dynamic)items).Item(index);
+                    var name = (string)((dynamic)item!).Name;
+                    var target = (string?)((dynamic)item).ExtendedProperty("System.Link.TargetParsingPath");
+                    var aumid = (string?)((dynamic)item).ExtendedProperty("System.AppUserModel.ID");
+                    ExternalAppEntry entry;
+                    if (!string.IsNullOrWhiteSpace(target) && Path.IsPathFullyQualified(target)
+                        && string.Equals(Path.GetExtension(target), ".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(target))
+                    {
+                        entry = ResolveExecutable(target);
+                        entry.DisplayName = name;
+                    }
+                    else if (IsAppUserModelId(aumid))
+                    {
+                        entry = new ExternalAppEntry
+                        {
+                            Id = ExternalAppEntry.CreatePackagedStableId(aumid!, "", null),
+                            DisplayName = name, Kind = ExternalAppEntry.PackagedAppKind, AppUserModelId = aumid,
+                        };
+                    }
+                    else continue;
+                    if (IsApplicationEntry(entry)) TryAddScannedEntry(entries, entry, out _);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    errors.Add(new ExternalAppScanError("AppsFolder", FriendlyError(ex)));
+                }
+                finally { ReleaseCom(item); }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errors.Add(new ExternalAppScanError("AppsFolder", ex.Message));
+        }
+        finally { ReleaseCom(items); ReleaseCom(folder); ReleaseCom(shell); }
+    }
+
+    private static void ReleaseCom(object? value)
+    {
+        if (value != null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value);
+    }
+
+    private static void ScanRegisteredApps(IDictionary<string, ExternalAppEntry> entries,
+        List<ExternalAppScanError> errors, CancellationToken cancellationToken)
+    {
+        // App Paths contains registered launchers, unlike uninstall records' DisplayIcon/UninstallString.
+        foreach (var hive in new[] { Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryHive.LocalMachine })
+        foreach (var view in new[] { Microsoft.Win32.RegistryView.Registry64, Microsoft.Win32.RegistryView.Registry32 })
+        {
+            try
+            {
+                using var root = Microsoft.Win32.RegistryKey.OpenBaseKey(hive, view);
+                using var paths = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths");
+                if (paths == null) continue;
+                foreach (var name in paths.GetSubKeyNames())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        using var key = paths.OpenSubKey(name);
+                        var path = (key?.GetValue(null) as string)?.Trim().Trim('"');
+                        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)
+                            || !string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(path)) continue;
+                        var entry = ResolveExecutable(path);
+                        var description = FileVersionInfo.GetVersionInfo(path).FileDescription;
+                        if (!string.IsNullOrWhiteSpace(description)) entry.DisplayName = description;
+                        if (IsApplicationEntry(entry)) TryAddScannedEntry(entries, entry, out _);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        errors.Add(new ExternalAppScanError(name, ex.Message));
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errors.Add(new ExternalAppScanError($"App Paths ({hive}/{view})", ex.Message));
+            }
+        }
     }
 
     private static Task<T> RunOnStaAsync<T>(Func<T> operation, CancellationToken cancellationToken, string threadName)

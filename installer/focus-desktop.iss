@@ -1,4 +1,4 @@
-﻿; focus-desktop Inno Setup 脚本（Public v1）
+; focus-desktop Inno Setup 脚本（Public v1）
 ; 构建：installer/build-release.ps1 调 ISCC 编译本脚本。
 ; 产物：FocusDesktop-Setup-<version>.exe
 ; 关键语义：
@@ -12,7 +12,7 @@
 #define AppNameZh "专注学习环境"
 #define AppExeName "focus-desktop.exe"
 #ifndef Version
-#define Version "2.0.0"
+#define Version "2.1.0"
 #endif
 #ifndef PayloadDir
 #define PayloadDir "payload"

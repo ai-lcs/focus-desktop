@@ -145,8 +145,10 @@ internal sealed class DockWindow : Window
         root.Children.Add(scroll);
 
         _status.Margin = new Thickness(6, 10, 6, 8);
-        Grid.SetRow(_status, 3);
-        root.Children.Add(_status);
+        var footer = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+        footer.Children.Add(_status);
+        Grid.SetRow(footer, 3);
+        root.Children.Add(footer);
         Content = root;
 
         var windows = new ExternalAppWindowService(entries, keyboard);
@@ -177,6 +179,8 @@ internal sealed class DockWindow : Window
         {
             _isClosed = true;
             _clock.Stop();
+            footer.Children.Clear();
+            _main.RestoreSystemControls();
             _main.PersistentNavigationRequested -= ReturnToFocusDesk;
             _topBar?.Release();
             _appBar.RegistrationLost -= OnRegistrationLost;
@@ -185,6 +189,7 @@ internal sealed class DockWindow : Window
             _appBar.Dispose();
             _windows.Dispose();
         };
+        footer.Children.Add(_main.DetachSystemControls());
     }
 
     public bool TryShowDock(bool registerAppBar)
@@ -221,6 +226,7 @@ internal sealed class DockWindow : Window
 
     public bool ReleaseAppBar()
     {
+        _main.CloseSystemControls();
         WindowTransitions.SetVisible(this, false);
         if (_topBar != null && !_topBar.Release()) return false;
         return _appBar.Release();

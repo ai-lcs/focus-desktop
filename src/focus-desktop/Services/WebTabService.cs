@@ -40,6 +40,10 @@ public sealed class WebTabService : IDisposable
 
     public IReadOnlyList<TabInfo> Tabs => _tabs;
 
+    private static bool IsLocalText(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile
+        && Path.GetExtension(uri.LocalPath).ToLowerInvariant() is ".txt" or ".md";
+
     /// <summary>WebView2 Runtime 缺失时抛带安装指引的异常（UI 层转友好卡片）。</summary>
     public async Task EnsureEnvironmentAsync()
     {
@@ -94,7 +98,25 @@ public sealed class WebTabService : IDisposable
                 Visible = false,
             };
             host.Controls.Add(view);
+            if (IsLocalText(info.InitialUrl)) view.DefaultBackgroundColor = System.Drawing.Color.White;
             await view.EnsureCoreWebView2Async(_env);
+            view.CoreWebView2.NavigationCompleted += async (_, e) =>
+            {
+                if (!e.IsSuccess || !IsLocalText(view.CoreWebView2.Source)) return;
+                try
+                {
+                    // Local text inherits browser theme and has no page background of its own.
+                    await view.CoreWebView2.ExecuteScriptAsync("""
+                        for (const element of [document.documentElement, document.body, document.querySelector('pre.plain')]) {
+                            if (!element) continue;
+                            element.style.setProperty('color-scheme', 'light', 'important');
+                            element.style.setProperty('background-color', '#ffffff', 'important');
+                            element.style.setProperty('color', '#202124', 'important');
+                        }
+                        """);
+                }
+                catch (Exception ex) { CrashReporter.Write(ex, "text-preview-style"); }
+            };
 
             // 创建期间允许用户关闭 Tab；不要把已关闭的控件重新写回列表。
             idx = _tabs.FindIndex(t => t.Id == id);
@@ -113,6 +135,7 @@ public sealed class WebTabService : IDisposable
             cfg.Whitelist = effectiveWhitelist;
             cfg.LoginDomains = effectiveLoginDomains;
             WirePolicy(view, cfg);
+            WireTextPreview(view, cfg);
             WireTitleSync(id, info.Title, view);
             WireProcessFailed(view);
 
@@ -200,6 +223,27 @@ public sealed class WebTabService : IDisposable
 
     public static event Action<Microsoft.Web.WebView2.Core.CoreWebView2ProcessFailedKind>? ProcessFailed;
     public static event Action? Recovering;
+
+    private void WireTextPreview(Microsoft.Web.WebView2.WinForms.WebView2 view, AppSettings cfg)
+    {
+        var core = view.CoreWebView2;
+        core.AddWebResourceRequestedFilter("file://*", CoreWebView2WebResourceContext.All);
+        core.WebResourceRequested += async (_, e) =>
+        {
+            if (!IsLocalText(e.Request.Uri)) return;
+            var path = new Uri(e.Request.Uri).LocalPath;
+            using var deferral = e.GetDeferral();
+            string html;
+            try { html = await Task.Run(() => TextPreview.Render(path, cfg.StudyFolder)); }
+            catch (Exception ex) { html = TextPreview.Error(ex); }
+            try
+            {
+                e.Response = _env!.CreateWebResourceResponse(
+                    new MemoryStream(System.Text.Encoding.UTF8.GetBytes(html)), 200, "OK", "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store");
+            }
+            catch (Exception ex) { CrashReporter.Write(ex, "text-preview-response"); }
+        };
+    }
 
     private static void WirePolicy(Microsoft.Web.WebView2.WinForms.WebView2 view, AppSettings cfg)
     {

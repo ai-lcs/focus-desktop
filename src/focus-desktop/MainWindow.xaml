@@ -53,21 +53,7 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="TabBar"/>
                 </ScrollViewer>
 
-                <!-- 音量：胶囊（静音键 + 细滑轨 + 百分比） -->
-                <Border Grid.Column="1" Background="#1F2226" CornerRadius="14" Padding="10,4" Margin="0,0,12,0"
-                        VerticalAlignment="Center" BorderBrush="#3A3F46" BorderThickness="1">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button x:Name="MuteButton" Content="🔊" FontSize="13" Padding="2" Margin="0,0,6,0"
-                                Background="Transparent" BorderThickness="0" Cursor="Hand"
-                                Foreground="{DynamicResource FgBrush}" Click="MuteButton_Click"/>
-                        <Slider x:Name="VolumeSlider" Width="80" Minimum="0" Maximum="100"
-                                VerticalAlignment="Center" Style="{StaticResource SlimSlider}"
-                                ValueChanged="VolumeSlider_ValueChanged"/>
-                        <TextBlock x:Name="VolumePct" Text="50" FontSize="11" MinWidth="24" TextAlignment="Right"
-                                   VerticalAlignment="Center" Margin="6,0,2,0"
-                                   Foreground="{DynamicResource MutedBrush}"/>
-                    </StackPanel>
-                </Border>
+                <Border x:Name="SystemControlsHost" Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center"/>
 
                 <!-- DEV + 退出 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">

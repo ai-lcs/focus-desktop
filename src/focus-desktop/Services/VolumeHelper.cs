@@ -57,10 +57,33 @@ public static class VolumeHelper
         catch (Exception ex) { LastError = $"Get: {ex.Message}"; return 50; }
     }
 
+    public static bool TryRead(out int percent, out bool muted)
+    {
+        percent = 0;
+        muted = false;
+        Init();
+        if (_vol == null) { _tried = false; return false; }
+        try
+        {
+            _vol.GetMasterVolumeLevelScalar(out var level);
+            _vol.GetMute(out muted);
+            percent = (int)Math.Round(level * 100);
+            LastError = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LastError = ex.Message;
+            _vol = null;
+            _tried = false;
+            return false;
+        }
+    }
+
     public static void Set(int percent)
     {
         if (_vol == null) return;
-        try { _vol.SetMasterVolumeLevelScalar(percent / 100f, IntPtr.Zero); }
+        try { _vol.SetMasterVolumeLevelScalar(Math.Clamp(percent, 0, 100) / 100f, IntPtr.Zero); }
         catch (Exception ex) { LastError = $"Set: {ex.Message}"; }
     }
 

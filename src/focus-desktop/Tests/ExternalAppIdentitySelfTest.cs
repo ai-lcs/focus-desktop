@@ -46,10 +46,14 @@ public static class ExternalAppIdentitySelfTest
             Verify("desktop scan keeps the first launch definition",
                 ExternalAppCatalog.TryAddScannedEntry(scanned, projectA, out var firstScanConflict)
                 && firstScanConflict == null);
-            Verify("desktop scan keeps and explains a different launch definition",
-                ExternalAppCatalog.TryAddScannedEntry(scanned, projectB, out var scanConflict)
-                && scanned.Count == 2
-                && scanConflict?.Contains("参数或工作目录不同", StringComparison.Ordinal) == true);
+            Verify("application scan deduplicates executable identities and preserves the first launch definition",
+                !ExternalAppCatalog.TryAddScannedEntry(scanned, projectB, out _)
+                && scanned.Count == 1 && scanned.Values.Single().Id == projectA.Id);
+            Verify("application scan does not merge applications by display name",
+                ExternalAppCatalog.TryAddScannedEntry(scanned, sameNameDifferentExecutable, out _)
+                && scanned.Count == 2);
+            Verify("application scan filters maintenance entries",
+                !ExternalAppCatalog.IsApplicationEntry(new ExternalAppEntry { DisplayName = "Uninstall Editor", ExecutablePath = executablePath }));
             var browseConflict = ExternalAppEntry.FindWindowMatchIdentityConflict(new[] { projectA }, projectB);
             Verify("browse identity conflict explains why definitions cannot both be selected",
                 browseConflict == projectA

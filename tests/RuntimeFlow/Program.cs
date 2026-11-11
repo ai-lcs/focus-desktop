@@ -45,7 +45,7 @@ internal static class Program
                     }
                     return IntPtr.Zero;
                 });
-            var timeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(args.Contains("--edge-input") ? 900 : 180) };
+            var timeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(args.Contains("--edge-input") || args.Contains("--feature-ui") ? 900 : 180) };
             if (args.Length >= 1 && uint.TryParse(args[0], out var parentId))
                 fixture.Activated += (_, _) => NativeMethods.AllowSetForegroundWindow(parentId);
             timeout.Tick += (_, _) => fixture.Close();
@@ -57,7 +57,7 @@ internal static class Program
         File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "runtime-progress.log"), "Main reached\n");
         _ = Task.Run(async () =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(args.Contains("--edge-input") ? 900 : 180));
+            await Task.Delay(TimeSpan.FromSeconds(args.Contains("--edge-input") || args.Contains("--feature-ui") ? 900 : 180));
             File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "runtime-progress.log"), "TIMEOUT\n");
             Environment.Exit(3);
         });
@@ -77,7 +77,7 @@ internal static class Program
     }
 }
 
-internal sealed class RuntimeApp : System.Windows.Application
+internal sealed partial class RuntimeApp : System.Windows.Application
 {
     public int Result { get; private set; } = 1;
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -134,6 +134,12 @@ internal sealed class RuntimeApp : System.Windows.Application
             main = new MainWindow(new AppOptions(true, false, false, true), focus);
             main.Show();
             Console.WriteLine("RuntimeFlow: main window shown");
+            if (e.Args.Contains("--feature-tests") || e.Args.Contains("--feature-ui"))
+            {
+                await RunFeatureTestsAsync(main, focus, study, settings, e.Args);
+                Result = 0;
+                return;
+            }
             if (e.Args.Contains("--skip-apps"))
             {
                 var wizard = new SetupWizard(settings, main);
@@ -178,6 +184,16 @@ internal sealed class RuntimeApp : System.Windows.Application
             }
             if (web?.Tabs.Count != 2) throw new Exception("Web initialization did not finish");
             var panel = (System.Windows.Forms.Panel)Field(main, "_hostPanel")!;
+            if (e.Args.Contains("--text-preview"))
+            {
+                foreach (var site in web.Tabs.Take(2).ToArray()) await web.EnsureTabAsync(site.Id, panel);
+                await VerifyTextPreviewsAsync(web, panel, study);
+                if (web.Tabs.Take(2).Any(tab => tab.View != null && tab.View.DefaultBackgroundColor.ToArgb() == System.Drawing.Color.White.ToArgb()))
+                    throw new Exception("Text preview changed a website background");
+                Console.WriteLine("PASS TXT and MD rendered content, security, encodings; website backgrounds unchanged");
+                Result = 0;
+                return;
+            }
             foreach (var tab in web.Tabs.ToArray())
             {
                 var ready = await web.EnsureTabAsync(tab.Id, panel);

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -24,6 +25,7 @@ public partial class ExternalAppSelectionControl : WpfUserControl
     private bool _scanCompleted;
     private bool _browseInProgress;
     private bool _isActive = true;
+    private CancellationTokenSource? _scanCancellation;
 
     public bool IsReady => _isActive && _scanCompleted && !_browseInProgress;
     public event Action<bool>? IsReadyChanged;
@@ -31,32 +33,47 @@ public partial class ExternalAppSelectionControl : WpfUserControl
     public ExternalAppSelectionControl()
     {
         InitializeComponent();
-        CountText.Text = "正在扫描桌面快捷方式…";
+        CountText.Text = "正在扫描 Windows 应用和开始菜单…";
     }
 
     public async Task InitializeAsync()
     {
         if (_initialized || !_isActive) return;
         _initialized = true;
+        await RefreshAsync();
+    }
+
+    private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _scanCancellation?.Cancel();
+        using var cancellation = new CancellationTokenSource();
+        _scanCancellation = cancellation;
+        _scanCompleted = false;
+        BrowseButton.IsEnabled = false;
+        IsReadyChanged?.Invoke(IsReady);
         try
         {
-            var scan = await ExternalAppCatalog.ScanDesktopAsync();
-            if (!_isActive) return;
+            var scan = await ExternalAppCatalog.ScanDesktopAsync(cancellation.Token);
+            if (!_isActive || cancellation.IsCancellationRequested) return;
             foreach (var entry in scan.Entries) AddEntry(entry, out _);
             ShowErrors(scan.Errors.Select(error => $"{Path.GetFileName(error.Path)}：{error.Message}"));
             UpdateCount();
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (!_isActive) return;
-            CountText.Text = "桌面快捷方式扫描失败；仍可浏览其他位置。";
+            CountText.Text = "应用扫描失败；仍可浏览其他位置。";
             ShowErrors(new[] { ex.Message });
         }
         finally
         {
-            _scanCompleted = true;
-            if (_isActive)
+            if (_isActive && _scanCancellation == cancellation)
             {
+                _scanCancellation = null;
+                _scanCompleted = true;
                 BrowseButton.IsEnabled = true;
                 IsReadyChanged?.Invoke(IsReady);
             }
@@ -66,6 +83,7 @@ public partial class ExternalAppSelectionControl : WpfUserControl
     public void CancelPendingOperations()
     {
         _isActive = false;
+        _scanCancellation?.Cancel();
         BrowseButton.IsEnabled = false;
     }
 
@@ -145,6 +163,7 @@ public partial class ExternalAppSelectionControl : WpfUserControl
         identityConflict = existingIdentity == null
             ? null
             : ExternalAppEntry.DescribeWindowMatchIdentityConflict(existingIdentity, entry);
+        if (existingIdentity != null) return false;
 
         var choice = new Choice(entry);
         _choices.Add(choice);
@@ -254,13 +273,16 @@ public partial class ExternalAppSelectionControl : WpfUserControl
         grid.Children.Add(remove);
         row.Child = grid;
         EntriesPanel.Children.Add(row);
+        choice.Row = row;
         choice.IconControl = icon;
+        ApplyFilter();
     }
 
     private static async Task LoadIconAsync(Choice choice)
     {
-        var path = choice.Entry.ExecutablePath ?? choice.Entry.ShortcutPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        var path = choice.Entry.ExecutablePath ?? choice.Entry.ShortcutPath
+            ?? (choice.Entry.AppUserModelId == null ? null : @"shell:AppsFolder\" + choice.Entry.AppUserModelId);
+        if (string.IsNullOrWhiteSpace(path)) return;
         try
         {
             var source = await Task.Run(() => ExtractIcon(path));
@@ -273,6 +295,23 @@ public partial class ExternalAppSelectionControl : WpfUserControl
 
     private static BitmapSource? ExtractIcon(string path)
     {
+        if (path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (SHParseDisplayName(path, IntPtr.Zero, out var pidl, 0, out _) < 0) return null;
+            try
+            {
+                if (SHGetFileInfo(pidl, 0, out var info, (uint)Marshal.SizeOf<ShellFileInfo>(), 0x100 | 0x8 | 0x1) == IntPtr.Zero || info.Icon == IntPtr.Zero) return null;
+                try
+                {
+                    var bitmap = System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(
+                        info.Icon, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(32, 32));
+                    bitmap.Freeze();
+                    return bitmap;
+                }
+                finally { DestroyIcon(info.Icon); }
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
         using var icon = DrawingIcon.ExtractAssociatedIcon(path);
         if (icon == null) return null;
         var source = System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(
@@ -280,6 +319,23 @@ public partial class ExternalAppSelectionControl : WpfUserControl
         source.Freeze();
         return source;
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ShellFileInfo
+    {
+        public IntPtr Icon;
+        public int IconIndex;
+        public uint Attributes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string DisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string TypeName;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHParseDisplayName(string name, IntPtr bindContext, out IntPtr pidl, uint attributes, out uint resultAttributes);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SHGetFileInfo(IntPtr pidl, uint attributes, out ShellFileInfo info, uint size, uint flags);
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr icon);
 
     private static WpfImageSource CreateFallbackIcon()
     {
@@ -300,7 +356,19 @@ public partial class ExternalAppSelectionControl : WpfUserControl
     private void UpdateCount()
     {
         var selected = _choices.Count(choice => choice.IsSelected);
-        CountText.Text = $"已选择 {selected} 个应用 · { _choices.Count } 个候选入口";
+        CountText.Text = $"已选择 {selected} 个应用 · {_choices.Count(choice => choice.Row?.Visibility == Visibility.Visible)} / {_choices.Count} 个候选";
+    }
+
+    private void Search_TextChanged(object sender, TextChangedEventArgs e) => ApplyFilter();
+
+    private void ApplyFilter()
+    {
+        var query = SearchBox?.Text.Trim() ?? "";
+        foreach (var choice in _choices)
+            if (choice.Row != null)
+                choice.Row.Visibility = choice.Entry.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    ? Visibility.Visible : Visibility.Collapsed;
+        if (CountText != null) UpdateCount();
     }
 
     private void ShowErrors(IEnumerable<string> errors)
@@ -336,5 +404,6 @@ public partial class ExternalAppSelectionControl : WpfUserControl
         public ExternalAppEntry Entry { get; } = entry;
         public bool IsSelected { get; set; }
         public WpfImage? IconControl { get; set; }
+        public Border? Row { get; set; }
     }
 }

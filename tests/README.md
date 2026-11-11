@@ -1,5 +1,13 @@
 # 测试说明
 
+## 2.1.0 功能验收
+
+`dotnet run --project tests/RuntimeFlow -- --feature-tests` 在独立便携测试目录检查本机应用发现（本机装有 Word/Excel/PowerPoint）、同名不同程序、同程序不同启动参数、取消扫描、搜索/刷新保留选择，及实际 WebView 中的 TXT 编码、空行、长行、Markdown 排版和资源限制。`--text-preview` 可单独运行文本渲染矩阵。
+
+`--feature-ui` 在三个阶段输出待人工操作信号；需要通过真实鼠标操作应用选择、无软件栏浮层、软件栏浮层。在测试 profile 中分别写入 `selection-done`、`no-dock-done`、`dock-done` 文件，文件内容必须等于本次测试 PID，才继续下一阶段。总时限 15 分钟；正常结束或异常路径会恢复测试开始时的音量、静音和内屏亮度。不得提前发信号冒充鼠标验收。
+
+纯逻辑自检参数为 `--dockselftest`（无连字符分隔），不打开主窗口。正式 GUI 回归沿用下述 `--formal --observe`；需要在 60 秒观察阶段提供真实前台输入，以满足 Windows 前台切换规则。
+
 ## 本轮稳定性测试
 
 新版 Dock 安装身份、默认安装目录和安装版数据路径已经独立于旧版；旧安装隔离脚本仍含历史 AppId 假设，禁止用于本轮宿主机验收。
