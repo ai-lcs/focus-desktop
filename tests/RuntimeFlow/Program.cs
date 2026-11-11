@@ -57,7 +57,7 @@ internal static class Program
         File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "runtime-progress.log"), "Main reached\n");
         _ = Task.Run(async () =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(args.Contains("--edge-input") || args.Contains("--feature-ui") ? 900 : 180));
+            await Task.Delay(TimeSpan.FromSeconds(args.Contains("--edge-input") || args.Contains("--feature-ui") || args.Contains("--system-controls-ui") ? 900 : 180));
             File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "runtime-progress.log"), "TIMEOUT\n");
             Environment.Exit(3);
         });
@@ -134,6 +134,12 @@ internal sealed partial class RuntimeApp : System.Windows.Application
             main = new MainWindow(new AppOptions(true, false, false, true), focus);
             main.Show();
             Console.WriteLine("RuntimeFlow: main window shown");
+            if (e.Args.Contains("--system-controls") || e.Args.Contains("--system-controls-ui"))
+            {
+                await VerifySystemControlsAsync(main, e.Args.Contains("--system-controls-ui"));
+                Result = 0;
+                return;
+            }
             if (e.Args.Contains("--feature-tests") || e.Args.Contains("--feature-ui"))
             {
                 await RunFeatureTestsAsync(main, focus, study, settings, e.Args);

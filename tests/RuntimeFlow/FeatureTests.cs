@@ -11,6 +11,81 @@ using focus_desktop.Services;
 
 internal sealed partial class RuntimeApp
 {
+    private static async Task VerifySystemControlsAsync(MainWindow main, bool observe)
+    {
+        var controls = Field(main, "_systemControls")!;
+        var host = (FrameworkElement)Call(main, "DetachSystemControls")!;
+        var root = new Grid();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
+        root.ColumnDefinitions.Add(new ColumnDefinition());
+        var sidebar = new Grid { Background = System.Windows.Media.Brushes.DarkSlateGray };
+        sidebar.Children.Add(host);
+        host.VerticalAlignment = VerticalAlignment.Bottom;
+        root.Children.Add(sidebar);
+        var outside = new TextBlock { Text = "网页 / 其他软件区域", Margin = new Thickness(16) };
+        Grid.SetColumn(outside, 1);
+        root.Children.Add(outside);
+        var window = new Window { Title = "Focus Desk 侧栏调节验收", Width = 440, Height = 540, Content = root };
+        window.Show();
+        var popup = (Popup)Field(controls, "_popup")!;
+        var inline = (Border)Field(controls, "_inlineHost")!;
+        var launchers = (StackPanel)controls.GetType().GetProperty("Launchers", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(controls)!;
+        var speaker = (System.Windows.Controls.Button)launchers.Children[0];
+        var sun = (System.Windows.Controls.Button)launchers.Children[1];
+        VolumeHelper.TryRead(out _, out var originalMute);
+        try
+        {
+            sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            var panel = (Border)Field(controls, "_panel")!;
+            var panelOrigin = panel.TranslatePoint(new System.Windows.Point(), sidebar);
+            Check(inline.Visibility == Visibility.Visible && !popup.IsOpen
+                && panelOrigin.X >= 0 && panelOrigin.X + panel.ActualWidth <= 96.1,
+                "expanded controls remain inside the 96px sidebar without a popup");
+            Check(((Slider)Field(controls, "_volume")!).ActualWidth > 0 && ((Slider)Field(controls, "_light")!).ActualWidth > 0,
+                "both vertical sliders are laid out inside the sidebar");
+            sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(inline.Visibility == Visibility.Collapsed && !popup.IsOpen, "sun icon collapses the inline controls");
+            if (VolumeHelper.IsReady)
+            {
+                speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                Check(VolumeHelper.IsMuted() != originalMute && inline.Visibility == Visibility.Collapsed && !popup.IsOpen,
+                    "speaker icon toggles system mute without opening controls");
+                speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            }
+            Check(FindButtons(host).Count() == 2, "controls contain only speaker and sun buttons, with no extra mute button");
+            if (observe)
+            {
+                Console.WriteLine("SYSTEM_CONTROLS_UI_READY " + Environment.ProcessId);
+                await WaitForFeatureSignal("system-controls-done");
+            }
+        }
+        finally
+        {
+            if (VolumeHelper.IsMuted() != originalMute) VolumeHelper.ToggleMute();
+            sidebar.Children.Clear();
+            host.VerticalAlignment = VerticalAlignment.Stretch;
+            Call(main, "RestoreSystemControls");
+            window.Close();
+        }
+        Check(!popup.IsOpen && ReferenceEquals(((Border)Field(main, "SystemControlsHost")!).Child, host),
+            "closing the sidebar restores the same controls to the top bar");
+        sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Check(popup.IsOpen && inline.Visibility == Visibility.Collapsed,
+            "without a sidebar the sun icon still opens the controls from the top bar");
+        Call(controls, "Close");
+    }
+
+    private static IEnumerable<System.Windows.Controls.Button> FindButtons(DependencyObject parent)
+    {
+        for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is System.Windows.Controls.Button button) yield return button;
+            foreach (var descendant in FindButtons(child)) yield return descendant;
+        }
+    }
+
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new Exception(message);

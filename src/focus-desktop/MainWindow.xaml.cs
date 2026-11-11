@@ -74,7 +74,7 @@ public partial class MainWindow : Window
         _focus = focus;
         InitializeComponent();
         _systemControls = new SystemControls();
-        SystemControlsHost.Child = _systemControls.Launchers;
+        SystemControlsHost.Child = _systemControls.Host;
         WindowTransitions.Disable(this);
         TabBar.PreviewMouseLeftButtonDown += (_, _) => { if (_headerDetached) PersistentNavigationRequested?.Invoke(); };
         ExitButton.PreviewMouseLeftButtonDown += (_, _) => { if (_headerDetached) PersistentNavigationRequested?.Invoke(); };
@@ -1262,14 +1262,14 @@ public partial class MainWindow : Window
         _systemControls.Close();
         SystemControlsHost.Child = null;
         _systemControls.AtDock = true;
-        return _systemControls.Launchers;
+        return _systemControls.Host;
     }
 
     internal void RestoreSystemControls()
     {
         _systemControls.Close();
         _systemControls.AtDock = false;
-        SystemControlsHost.Child = _systemControls.Launchers;
+        SystemControlsHost.Child = _systemControls.Host;
     }
 
     internal void CloseSystemControls() => _systemControls.Close();

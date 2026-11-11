@@ -1,5 +1,9 @@
 # 测试说明
 
+## 2.1.1 侧栏调节区
+
+`dotnet run --project tests/RuntimeFlow -- --system-controls` 使用独立 profile 检查调节区在 96 像素侧栏内展开、扬声器直接静音且不打开面板、只有两个底部图标，以及恢复顶栏后的控件复用。`--system-controls-ui` 显示可由真实鼠标操作的隔离布局窗口，输出本次 PID；完成操作后，将该 PID 写入测试 profile 的 `system-controls-done` 文件继续。测试结束恢复原静音状态，不改写音量或亮度。
+
 ## 2.1.0 功能验收
 
 `dotnet run --project tests/RuntimeFlow -- --feature-tests` 在独立便携测试目录检查本机应用发现（本机装有 Word/Excel/PowerPoint）、同名不同程序、同程序不同启动参数、取消扫描、搜索/刷新保留选择，及实际 WebView 中的 TXT 编码、空行、长行、Markdown 排版和资源限制。`--text-preview` 可单独运行文本渲染矩阵。
