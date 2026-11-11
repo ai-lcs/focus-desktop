@@ -45,4 +45,12 @@
 
 安装身份 `{50D19490-82AC-42D3-95B2-F8EBEA860817}`；原安装目录 `C:\Program Files\FocusDesk`；数据目录 `%LOCALAPPDATA%\focus-desktop-dock`。升级前程序及真实 WebView 已退出，最初离线备份 1371 个 profile 文件；安装前再次离线备份并逐文件核验 1471 个文件。
 
-已启动指纹匹配的 Setup，使用 `/ALLUSERS /VERYSILENT /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS`，明确原安装目录。当前等待 Windows UAC 批准；尚未将安装、安装后数据核对或真实登录态验收记为通过。
+用户批准 Windows UAC 后，指纹匹配的 Setup 使用 `/ALLUSERS /VERYSILENT /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS` 在原目录完成覆盖安装，退出代码 0；没有先卸载，没有运行带 `--remove-user-data` 的助手。
+
+- 安装后、首次手动启动前，完整比较备份中的 1471 个数据文件，差异 0。随后运行网站产生的正常缓存/Cookie 更新不作为安装数据改写。
+- 已安装 EXE 为 `2.1.0.0`，SHA-256 与上表最终测试程序一致；HKLM 原 AppId 下版本为 `2.1.0`，原安装目录不变。公共桌面 `Focus Desk.lnk` 仍指向 `C:\Program Files\FocusDesk\focus-desktop.exe`，安装目录没有 portable.flag。
+- 从桌面入口实际启动后直接使用原配置，没有首配向导。保留六个软件入口、五个网站及原学习目录；实际网页界面确认 Bilibili、ChatGPT、Google AI Studio、DeepSeek、Gemini Notebook 的原账户会话仍在，没有重新认证或输入消息。
+- 安装版验收后通过程序自身正常关闭助手退出（未带数据删除参数），退出代码 0。配置文件和 setup_done 标记仍与安装前备份逐字节相同，任务栏可见、工作区恢复原值、恢复标记为 clean。
+- 安装版独立 Dock/顶栏没有出现在原生控制接口的可选窗口清单中。经两种受支持接口核对后，未继续绕过窗口选择限制；不将本次安装版的软件栏切换和浮层操作记为新增真实鼠标验收。开发阶段的两种浮层布局、真实拖动与最终包正式模式/异常恢复结果分别保留在上文，不能混称为完整安装版鼠标验收。
+
+安装后结构化证据：`D:\focus-desktop-handoff\dock-evidence\2026-11-11-2.1.0\installed-acceptance.json`；正常退出后的桌面快照：同目录 `installed-after-normal-exit.json`。安装日志保留在私有备份目录，没有提交到仓库。
