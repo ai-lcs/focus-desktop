@@ -16,4 +16,6 @@ Debug 回归构建和 self-contained Release / Setup / 便携 ZIP 构建通过�
 | FocusDesk-Setup-2.1.2.exe | `a025bfc3592fcaa28aa85fa46590c029022c09687fef0d8e48018e1f1578961e` |
 | focus-desk-portable-2.1.2.zip | `a6783559aae4dad3d242e8fea6f35e536983fb3a8c147d8cc3b89974d56be72e` |
 
-升级前正式程序及其 WebView 已退出，原程序与 profile 备份在当前账户的 LocalAppData 私有目录，1690 个数据文件逐个核对通过。安装器沿用原 AppId、原安装目录和数据路径，未先卸载，未运行带数据删除参数的助手；当前等待 Windows UAC 批准，尚未将覆盖安装记为完成。未发布 GitHub Release。
+2026-11-14 的首次安装请求被 Windows 返回为取消，未改动原 2.1.1 安装。2026-11-15 用户要求继续后，重新确认正式程序及真实 WebView 已退出，并在当前账户的 LocalAppData 私有目录重新离线备份原程序与 profile，1690 个数据文件逐个核对通过。
+
+用户批准新的 UAC 请求后，覆盖安装退出代码 0。安装后版本为 `2.1.2.0`，EXE 哈希与上表补丁程序一致；1690 个数据文件逐一比较，差异 0；公共桌面入口仍指向 `C:\Program Files\FocusDesk\focus-desktop.exe`。安装器沿用原 AppId、目录和数据路径，未先卸载，未运行带数据删除参数的助手。结构化证据为上述证据目录中的 `installed-acceptance.json`，安装日志仅保留在私有备份目录。未发布 GitHub Release。
