@@ -1,5 +1,9 @@
 # 测试说明
 
+## 2.1.2 番茄钟暂停回归
+
+`dotnet run --project tests/RuntimeFlow -- --pomodoro` 不启动主窗口、不访问 profile、不操作任务栏或硬件。用生产计时结束路径验证正式/预览模式下的短休息、长休息：Hard Focus 工作段拒绝暂停；结束后按钮恢复启用和透明度，休息及下一轮普通专注可通过按钮暂停、继续。测试临时调整内存中的起始时间以触发结束，不必等待真实倒计时。
+
 ## 2.1.1 侧栏调节区
 
 `dotnet run --project tests/RuntimeFlow -- --system-controls` 使用独立 profile 检查调节区在 96 像素侧栏内展开、扬声器直接静音且不打开面板、只有两个底部图标，以及恢复顶栏后的控件复用。`--system-controls-ui` 显示可由真实鼠标操作的隔离布局窗口，输出本次 PID；完成操作后，将该 PID 写入测试 profile 的 `system-controls-done` 文件继续。测试结束恢复原静音状态，不改写音量或亮度。

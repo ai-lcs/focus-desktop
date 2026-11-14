@@ -415,6 +415,8 @@ public class PomodoroControl : System.Windows.Controls.UserControl
         }
         else
         {
+            _btnPause.IsEnabled = true;
+            _btnPause.Opacity = 1;
             _btnReset.IsEnabled = true;
             _btnReset.Opacity = 1;
             _hardTrack.Background = new SolidColorBrush(SwmColor.FromRgb(0x3A, 0x3F, 0x46));

@@ -24,6 +24,8 @@ internal static class Program
     {
         if (args.Length == 4 && args[0] == "--watchdog")
             return WatchdogService.RunLoop(int.Parse(args[1]), long.Parse(args[2]), args[3]);
+        if (args.Length == 1 && args[0] == "--pomodoro")
+            return PomodoroRegression.Run();
         if (Path.GetFileNameWithoutExtension(Environment.ProcessPath) == "FlowFixture")
         {
             var fixtureApp = new System.Windows.Application();
