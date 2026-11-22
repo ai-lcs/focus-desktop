@@ -28,6 +28,8 @@ internal static class Program
             return PomodoroRegression.Run();
         if (Path.GetFileNameWithoutExtension(Environment.ProcessPath) == "FlowFixture")
         {
+            var delay = args.FirstOrDefault(arg => arg.StartsWith("--delay-window="))?[15..];
+            if (delay != null) Thread.Sleep(int.Parse(delay));
             var fixtureApp = new System.Windows.Application();
             var fixture = new Window
             {
@@ -136,6 +138,23 @@ internal sealed partial class RuntimeApp : System.Windows.Application
             main = new MainWindow(new AppOptions(true, false, false, true), focus);
             main.Show();
             Console.WriteLine("RuntimeFlow: main window shown");
+            if (e.Args.Contains("--slow-launch"))
+            {
+                await VerifySlowLaunchAsync(main, focus);
+                Result = 0;
+                return;
+            }
+            var verifyEntry = e.Args.FirstOrDefault(arg => arg.StartsWith("--verify-entry="))?[15..];
+            if (verifyEntry != null)
+            {
+                using var windows = new ExternalAppWindowService(new[] { ExternalAppCatalog.Resolve(verifyEntry) }, new KeyboardGuardService());
+                var find = typeof(ExternalAppWindowService).GetMethod("FindWindow", PrivateInstance)!;
+                var window = (IntPtr)find.Invoke(windows, new object[] { ExternalAppCatalog.Resolve(verifyEntry), IntPtr.Zero, true })!;
+                if (window == IntPtr.Zero) throw new Exception("Already running application window was not recognized; test never launches the application");
+                Console.WriteLine("PASS existing launcher entry recognizes a real application window without launching another process");
+                Result = 0;
+                return;
+            }
             if (e.Args.Contains("--system-controls") || e.Args.Contains("--system-controls-ui"))
             {
                 await VerifySystemControlsAsync(main, e.Args.Contains("--system-controls-ui"));
@@ -264,6 +283,7 @@ internal sealed partial class RuntimeApp : System.Windows.Application
             else dock = (Window)Activator.CreateInstance(dockType, main, focus, new[] { fixtureEntry }, new KeyboardGuardService(), false)!;
             try
             {
+                if (!formal && e.Args.Contains("--launch-ui")) dock.ShowInTaskbar = true;
                 if (!formal && !(bool)Call(dock, "TryShowDock", false)!) throw new Exception("Dock registration failed");
                 Call(main, "ActivateTab", web.Tabs[0].Id);
                 Call(dock, "ReturnHome");
@@ -301,6 +321,12 @@ internal sealed partial class RuntimeApp : System.Windows.Application
                 HardFocus.Enable(true);
                 lastTick = Stopwatch.GetTimestamp();
                 heartbeat.Start();
+                if (e.Args.Contains("--launch-ui"))
+                {
+                    Console.WriteLine("LAUNCHER_UI_READY " + Environment.ProcessId);
+                    await WaitForFeatureSignal("launcher-ui-done");
+                    lastTick = Stopwatch.GetTimestamp();
+                }
                 for (var cycle = 0; cycle < (entryPath == null ? 40 : 1); cycle++)
                 {
                     foreach (var id in new[] { web.Tabs[0].Id, web.Tabs[1].Id, "files", "home" })

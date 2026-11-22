@@ -237,7 +237,7 @@ internal sealed class DockWindow : Window
         Activate();
         var intent = _windows.BeginIntent(entry.Id);
         _main.PrepareForExternalWindow();
-        _status.Text = $"正在打开 {entry.DisplayName}…";
+        _status.Text = "";
         var result = await _windows.ActivateAsync(entry, intent);
         if (!_windows.IsCurrentIntent(intent)) return;
         if (result.Activated)
@@ -247,10 +247,8 @@ internal sealed class DockWindow : Window
             return;
         }
 
-        if (result.Superseded) return;
+        if (result.Superseded || result.LaunchPending) return;
         _status.Text = result.Error ?? "无法切换到此应用。";
-        SelectEntry(null);
-        _main.ReturnToFocusDesk();
     }
 
     private void ReturnToFocusDesk()

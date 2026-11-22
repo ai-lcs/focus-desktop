@@ -30,4 +30,4 @@
 
 安装前确认正式程序及其 WebView 未运行，离线备份当前 2.1.2 程序与用户 profile；2088 个数据文件逐个核对，备份差异 0。备份及安装日志仅存本机 LocalAppData 私有备份目录，不进入仓库。
 
-已启动同 AppId、同目录的覆盖安装，当前等待用户批准 Windows UAC，尚未宣称桌面安装完成。安装后使用 `D:\focus-desktop-handoff\dock-evidence\2026-11-22-2.1.3\verify-installed.ps1` 核对版本、EXE 哈希、全部 profile 文件和桌面快捷方式，结构化结果写入同目录 `installed-acceptance.json`。不执行卸载，不清除用户数据，不发布 GitHub Release。
+该次同 AppId、同目录的覆盖安装被 Windows 返回为取消，2.1.3 未安装到桌面。随后用户要求合并软件栏稳定性修复统一升级，改由 2.1.4 承接，见 `focus-desk-2.1.4-launcher-2026-11-22.md`。不执行卸载，不清除用户数据，不发布 GitHub Release。

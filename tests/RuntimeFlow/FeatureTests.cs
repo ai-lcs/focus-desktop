@@ -11,6 +11,61 @@ using focus_desktop.Services;
 
 internal sealed partial class RuntimeApp
 {
+    private static async Task VerifySlowLaunchAsync(MainWindow main, FocusModeService focus)
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "FlowFixture.exe");
+        File.Copy(Environment.ProcessPath!, fixturePath, true);
+        var entry = ExternalAppCatalog.Resolve(fixturePath);
+        entry.Arguments = Environment.ProcessId + " --delay-window=14000";
+        entry.Id = (string)typeof(ExternalAppEntry).GetMethod("CreateWin32StableId", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object?[] { entry.ExecutablePath, entry.Arguments, entry.WorkingDirectory })!;
+        var dockType = typeof(MainWindow).Assembly.GetType("focus_desktop.DockWindow")!;
+        using var keyboard = new KeyboardGuardService();
+        var dock = (Window)Activator.CreateInstance(dockType, main, focus, new[] { entry }, keyboard, false)!;
+        var originalProcesses = System.Diagnostics.Process.GetProcessesByName("FlowFixture").Select(process => process.Id).ToHashSet();
+        try
+        {
+            Check((bool)Call(dock, "TryShowDock", false)!, "slow-launch Dock opens");
+            Call(dock, "ReturnHome");
+            var launch = (Task)Call(dock, "ActivateEntryAsync", entry)!;
+            await Task.Delay(250);
+            Check(((TextBlock)Field(dock, "_status")!).Text == "", "launch adds no starting message");
+            await launch;
+            Check(((TextBlock)Field(dock, "_status")!).Text == "" && !main.Topmost,
+                "successful Shell launch without a window after 12 seconds is not a timeout error or forced return");
+            var retry = (Task)Call(dock, "ActivateEntryAsync", entry)!;
+            System.Diagnostics.Process[] fixtures = Array.Empty<System.Diagnostics.Process>();
+            for (var attempt = 0; attempt < 150; attempt++)
+            {
+                foreach (var process in fixtures) process.Dispose();
+                fixtures = System.Diagnostics.Process.GetProcessesByName("FlowFixture").Where(process => !originalProcesses.Contains(process.Id)).ToArray();
+                if (fixtures.Length == 1 && fixtures[0].MainWindowHandle != IntPtr.Zero) break;
+                await Task.Delay(100);
+            }
+            Check(fixtures.Length == 1 && fixtures[0].MainWindowHandle != IntPtr.Zero,
+                "slow application becomes available and stays alive after the initial observation");
+            await retry;
+            await (Task)Call(dock, "ActivateEntryAsync", entry)!;
+            Check(((ExternalAppWindowService)Field(dock, "_windows")!).IsExternalWindowForeground,
+                "next pinned-entry click switches to the late window: " + ((TextBlock)Field(dock, "_status")!).Text);
+            Check(System.Diagnostics.Process.GetProcessesByName("FlowFixture").Count(process => !originalProcesses.Contains(process.Id)) == 1,
+                "switching reuses the late application instead of launching another process");
+            foreach (var process in fixtures) process.Dispose();
+        }
+        finally
+        {
+            dock.Close();
+            foreach (var process in System.Diagnostics.Process.GetProcessesByName("FlowFixture").Where(process => !originalProcesses.Contains(process.Id)))
+            {
+                using (process)
+                {
+                    process.CloseMainWindow();
+                    if (!process.WaitForExit(3000)) process.Kill();
+                }
+            }
+        }
+    }
+
     private static async Task VerifySystemControlsAsync(MainWindow main, bool observe)
     {
         var controls = Field(main, "_systemControls")!;

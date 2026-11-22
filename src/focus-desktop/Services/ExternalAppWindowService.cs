@@ -99,6 +99,7 @@ public sealed class DockLaunchRequests
 public sealed record ExternalWindowSwitchResult(bool Activated, bool Superseded, string? Error)
 {
     public long IntentToken { get; init; }
+    public bool LaunchPending { get; init; }
 }
 
 /// <summary>
@@ -228,8 +229,7 @@ public sealed class ExternalAppWindowService : IDisposable
         }
 
         return !string.Equals(entry.Kind, ExternalAppEntry.PackagedAppKind, StringComparison.Ordinal)
-            && entry.ExecutablePath != null
-            && PathsEqual(ExternalAppEntry.WindowExecutablePath(entry.ExecutablePath), identity.ExecutablePath);
+            && entry.MatchesWindowExecutable(identity.ExecutablePath);
     }
 
     public static bool MatchesOwnerChain(ExternalAppEntry entry, IReadOnlyList<ExternalWindowIdentity> ownerChain)
@@ -276,9 +276,12 @@ public sealed class ExternalAppWindowService : IDisposable
             if (window == IntPtr.Zero)
             {
                 var launchTask = _launches.GetOrStart(entry.Id, () => LaunchAndWaitAsync(entry, _lifetime.Token));
+                var observation = System.Diagnostics.Stopwatch.StartNew();
                 while (!launchTask.IsCompleted)
                 {
                     if (!_intents.IsCurrent(intent)) return MakeResult(false, true, null, intent);
+                    if (observation.Elapsed >= TimeSpan.FromSeconds(12))
+                        return MakeResult(false, false, null, intent) with { LaunchPending = true };
                     await Task.WhenAny(launchTask, Task.Delay(100, _lifetime.Token)).ConfigureAwait(false);
                 }
                 window = await launchTask.ConfigureAwait(false) ?? IntPtr.Zero;
@@ -286,7 +289,9 @@ public sealed class ExternalAppWindowService : IDisposable
 
             if (!_intents.IsCurrent(intent)) return MakeResult(false, true, null, intent);
             if (window == IntPtr.Zero)
-                return MakeResult(false, false, "等待应用窗口超时。可以稍后再次点击重试。", intent);
+                // Shell launch succeeded. A slow or handed-off application is not
+                // a failed launch, and must not be covered by the Focus Desk home.
+                return MakeResult(false, false, null, intent) with { LaunchPending = true };
 
             var current = await Task.Run(() => FindWindow(entry, window), _lifetime.Token).ConfigureAwait(false);
             if (!_intents.IsCurrent(intent)) return MakeResult(false, true, null, intent);
@@ -369,7 +374,9 @@ public sealed class ExternalAppWindowService : IDisposable
     {
         using (await Task.Run(() => ExternalAppCatalog.Launch(entry), cancellationToken).ConfigureAwait(false)) { }
 
-        var stopAt = DateTime.UtcNow.AddSeconds(12);
+        // Retain the shared launch while a slow application starts, so another
+        // click reuses it. Observation ending never closes or terminates the app.
+        var stopAt = DateTime.UtcNow.AddMinutes(2);
         while (DateTime.UtcNow < stopAt)
         {
             cancellationToken.ThrowIfCancellationRequested();

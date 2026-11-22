@@ -1,11 +1,12 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace focus_desktop.Services;
 
 /// <summary>
 /// A frozen launch entry. Window ownership is matched by AppUserModelId for packaged
-/// apps or ExecutablePath for Win32 apps, never by a title or process display name.
+/// apps or the executable/verified launcher installation for Win32 apps, never by a title.
 /// </summary>
 public sealed class ExternalAppEntry
 {
@@ -153,6 +154,44 @@ public sealed class ExternalAppEntry
         catch (UnauthorizedAccessException) { }
         return executablePath;
     }
+
+    internal bool MatchesWindowExecutable(string? actualPath)
+    {
+        if (string.IsNullOrWhiteSpace(ExecutablePath) || string.IsNullOrWhiteSpace(actualPath)) return false;
+        try
+        {
+            var expected = NormalizeWindowPath(WindowExecutablePath(ExecutablePath));
+            var actual = NormalizeWindowPath(actualPath);
+            if (string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase)) return true;
+
+            // The WPS suite shortcut starts ksolaunch, but its documents run in
+            // versioned office6 executables. Match this verified installation only.
+            if (!string.Equals(Path.GetFileName(expected), "ksolaunch.exe", StringComparison.OrdinalIgnoreCase)) return false;
+            var relative = Path.GetRelativePath(Path.GetDirectoryName(expected)!, actual).Split(Path.DirectorySeparatorChar);
+            if (relative.Length != 3 || !Version.TryParse(relative[0], out _)
+                || !string.Equals(relative[1], "office6", StringComparison.OrdinalIgnoreCase)
+                || !new[] { "wps.exe", "wpspdf.exe", "wpp.exe", "et.exe" }.Contains(relative[2], StringComparer.OrdinalIgnoreCase)) return false;
+            var launcher = System.Diagnostics.FileVersionInfo.GetVersionInfo(expected);
+            var target = System.Diagnostics.FileVersionInfo.GetVersionInfo(actual);
+            return launcher.ProductName == "WPS Office" && target.ProductName == launcher.ProductName
+                && !string.IsNullOrWhiteSpace(launcher.CompanyName) && target.CompanyName == launcher.CompanyName;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    internal static string NormalizeWindowPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var longPath = new StringBuilder(32768);
+        var length = GetLongPathName(fullPath, longPath, (uint)longPath.Capacity);
+        return length > 0 && length < longPath.Capacity ? longPath.ToString() : fullPath;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "GetLongPathNameW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern uint GetLongPathName(string shortPath, StringBuilder longPath, uint capacity);
 
     public static ExternalAppEntry? FindWindowMatchIdentityConflict(
         IEnumerable<ExternalAppEntry> entries,
