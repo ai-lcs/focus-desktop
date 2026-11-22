@@ -18,4 +18,16 @@
 
 `dotnet run --no-build --project tests/RuntimeFlow -- --pomodoro` 通过正式/预览 × 短/长休息的四组既有回归。
 
-安装前离线备份现有程序及用户数据；构建及覆盖安装结果在后续安装记录中填写。
+## 构建与安装
+
+产品提交：`0fd918eb2dc587f46df21006c2cbd2b33bd493db`。self-contained Release、Setup 和便携 ZIP 构建通过，产物目录 `release/2.1.3-local-20261122`。
+
+| 产物 | SHA-256 |
+| --- | --- |
+| focus-desktop.exe | `849075d15532318d5a1ee8d869fcbf8bb273f4ebf3976e7aa8ec99be6b5e3ed4` |
+| FocusDesk-Setup-2.1.3.exe | `ec493ae3525b8a41941e88e42c7a8470c3c407fe557a39b92c1485862eca50db` |
+| focus-desk-portable-2.1.3.zip | `7112619a8c914e7d61b7a0cea027ccfb6a4cae5e198b35139ded9ffc7253f819` |
+
+安装前确认正式程序及其 WebView 未运行，离线备份当前 2.1.2 程序与用户 profile；2088 个数据文件逐个核对，备份差异 0。备份及安装日志仅存本机 LocalAppData 私有备份目录，不进入仓库。
+
+已启动同 AppId、同目录的覆盖安装，当前等待用户批准 Windows UAC，尚未宣称桌面安装完成。安装后使用 `D:\focus-desktop-handoff\dock-evidence\2026-11-22-2.1.3\verify-installed.ps1` 核对版本、EXE 哈希、全部 profile 文件和桌面快捷方式，结构化结果写入同目录 `installed-acceptance.json`。不执行卸载，不清除用户数据，不发布 GitHub Release。
