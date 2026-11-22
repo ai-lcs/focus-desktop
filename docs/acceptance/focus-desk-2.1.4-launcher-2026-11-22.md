@@ -17,4 +17,18 @@
 - 通过 computer-use 实际鼠标点击隔离 Dock 的 WPS 入口、返回入口、WPS 入口，已有 WPS 文档可见，侧栏无启动、超时文字。仅为工具选窗，在该次开发模式测试中打开了 Dock 的 `ShowInTaskbar`；产品默认行为未改。
 - 合并后的源码再次通过音量/亮度 13 项检查、番茄钟 4 组回归、Dock 92 项纯检查。
 
-前版 2.1.3 的安装请求未获 UAC 完成，系统仍为 2.1.2。当前源码包含 2.1.3 全部音量、亮度修复；本次统一打包为 2.1.4。安装前重新离线备份并核对全部用户数据，构建和安装结果后续补入。
+## 合并构建及桌面升级
+
+前版 2.1.3 的安装请求未获 UAC 完成，此次升级前桌面版为 2.1.2。当前源码包含 2.1.3 全部音量、亮度修复，本次统一打包为 2.1.4，产品提交 `47949610ba453976ae4b1255d0ecaef844b3a962`。self-contained Release、Setup 和便携 ZIP 构建通过。
+
+| 产物 | SHA-256 |
+| --- | --- |
+| focus-desktop.exe | `f2624bf9a877a4471815945b19d5b999508ddc508cf37a840c49164ad729eb60` |
+| FocusDesk-Setup-2.1.4.exe | `c3f601ac831572cf3207bf67587e09760976a156368bc948b5b1b5979337f4dc` |
+| focus-desk-portable-2.1.4.zip | `5548ac211c67b0068f671f1b84f2ae3993dca5dbfb60eb0196458a85591999a8` |
+
+升级前确认正式程序及真实 profile 的 WebView 已退出，在 LocalAppData 私有目录重新离线备份原程序及 profile；2252 个用户数据文件逐个核对，备份差异 0。
+
+2026-11-22 14:44 覆盖安装退出码 0，未先卸载或清除数据。安装后版本 `2.1.4.0`，EXE 哈希与本次产物一致；原 AppId、安装目录及桌面快捷方式目标保持为 `C:\Program Files\FocusDesk\focus-desktop.exe`。安装后、启动正式 UI 前再次逐个核对 profile：2252 个文件，新增、删除及内容差异均为 0，配置和网页登录数据文件保留。
+
+结构化证据：`D:\focus-desktop-handoff\dock-evidence\2026-11-22-2.1.4\installed-acceptance.json`；构建产物 `release/2.1.4-local-20261122`。本次为本机升级，未发布 GitHub Release。实际 WPS 验收在隔离 profile 的同一产品代码上完成；安装版以版本、二进制哈希、数据和入口核对确认，未把这些核对说成安装后再次完整鼠标验收。
