@@ -32,28 +32,38 @@ internal sealed partial class RuntimeApp
         var launchers = (StackPanel)controls.GetType().GetProperty("Launchers", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(controls)!;
         var speaker = (System.Windows.Controls.Button)launchers.Children[0];
         var sun = (System.Windows.Controls.Button)launchers.Children[1];
-        VolumeHelper.TryRead(out _, out var originalMute);
+        var capture = typeof(VolumeHelper).GetMethod("CaptureState", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var restore = typeof(VolumeHelper).GetMethod("RestoreState", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var original = capture.Invoke(null, null)!;
+        var originalVolume = VolumeHelper.Get();
+        var mute = (System.Windows.Controls.Button)Field(controls, "_mute")!;
+        var audio = (StackPanel)Field(controls, "_audio")!;
+        var light = (StackPanel)Field(controls, "_lighting")!;
         try
         {
-            sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            var initialMute = VolumeHelper.IsMuted();
+            speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var panel = (Border)Field(controls, "_panel")!;
-            var panelOrigin = panel.TranslatePoint(new System.Windows.Point(), sidebar);
-            Check(inline.Visibility == Visibility.Visible && !popup.IsOpen
-                && panelOrigin.X >= 0 && panelOrigin.X + panel.ActualWidth <= 96.1,
-                "expanded controls remain inside the 96px sidebar without a popup");
-            Check(((Slider)Field(controls, "_volume")!).ActualWidth > 0 && ((Slider)Field(controls, "_light")!).ActualWidth > 0,
-                "both vertical sliders are laid out inside the sidebar");
+            var origin = panel.TranslatePoint(new System.Windows.Point(), sidebar);
+            Check(audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Collapsed && !popup.IsOpen
+                && origin.X >= 0 && origin.X + panel.ActualWidth <= 96.1, "speaker opens only volume inside sidebar");
+            Check(VolumeHelper.IsMuted() == initialMute, "outer speaker does not change native mute");
+            speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(inline.Visibility == Visibility.Collapsed, "outer speaker closes volume");
             sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
-            Check(inline.Visibility == Visibility.Collapsed && !popup.IsOpen, "sun icon collapses the inline controls");
-            if (VolumeHelper.IsReady)
-            {
-                speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
-                Check(VolumeHelper.IsMuted() != originalMute && inline.Visibility == Visibility.Collapsed && !popup.IsOpen,
-                    "speaker icon toggles system mute without opening controls");
-                speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
-            }
-            Check(FindButtons(host).Count() == 2, "controls contain only speaker and sun buttons, with no extra mute button");
+            Check(light.Visibility == Visibility.Visible && audio.Visibility == Visibility.Collapsed, "sun opens only brightness");
+            speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Collapsed, "switching icons replaces the panel");
+            mute.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(VolumeHelper.IsMuted() != initialMute, "inner speaker changes verified system-wide playback mute");
+            mute.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(VolumeHelper.IsMuted() == initialMute, "inner speaker toggles native mute back");
+            var targetVolume = originalVolume == 100 ? 99 : originalVolume + 1;
+            VolumeHelper.Set(targetVolume);
+            Check(VolumeHelper.Get() == targetVolume, "volume writes and reads the current default output");
+            VolumeHelper.Set(originalVolume);
+            Console.WriteLine("Active output endpoints verified: " + ((System.Collections.ICollection)capture.Invoke(null, null)!).Count);
             if (observe)
             {
                 Console.WriteLine("SYSTEM_CONTROLS_UI_READY " + Environment.ProcessId);
@@ -62,7 +72,8 @@ internal sealed partial class RuntimeApp
         }
         finally
         {
-            if (VolumeHelper.IsMuted() != originalMute) VolumeHelper.ToggleMute();
+            VolumeHelper.Set(originalVolume);
+            restore.Invoke(null, new[] { original });
             sidebar.Children.Clear();
             host.VerticalAlignment = VerticalAlignment.Stretch;
             Call(main, "RestoreSystemControls");
@@ -73,17 +84,14 @@ internal sealed partial class RuntimeApp
         sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         Check(popup.IsOpen && inline.Visibility == Visibility.Collapsed,
             "without a sidebar the sun icon still opens the controls from the top bar");
+        sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Check(!popup.IsOpen, "top bar sun closes its brightness panel");
+        speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Check(popup.IsOpen && audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Collapsed,
+            "top bar speaker opens only volume");
+        speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Check(!popup.IsOpen, "top bar speaker closes its volume panel");
         Call(controls, "Close");
-    }
-
-    private static IEnumerable<System.Windows.Controls.Button> FindButtons(DependencyObject parent)
-    {
-        for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
-            if (child is System.Windows.Controls.Button button) yield return button;
-            foreach (var descendant in FindButtons(child)) yield return descendant;
-        }
     }
 
     private static void Check(bool condition, string message)

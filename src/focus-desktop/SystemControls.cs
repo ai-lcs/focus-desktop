@@ -24,6 +24,12 @@ internal sealed class SystemControls : IDisposable
     private readonly TextBlock _lightLabel = Label("亮度");
     private readonly TextBlock _error = Label("正在读取内屏亮度…");
     private readonly Button _speaker;
+    private readonly Button _mute;
+    private readonly StackPanel _audio;
+    private readonly StackPanel _lighting;
+    private readonly TextBlock _audioError = Label("");
+    private bool _showingAudio;
+    private bool _closedOnLauncher;
     private readonly Border _panel;
     private readonly Grid _grid;
     private readonly Border _inlineHost = new() { Visibility = Visibility.Collapsed };
@@ -63,25 +69,37 @@ internal sealed class SystemControls : IDisposable
     internal SystemControls()
     {
         VolumeHelper.Init();
-        _speaker = IconButton("\uE767", "静音");
-        var sun = IconButton("\uE706", "展开或收起音量与亮度");
+        _speaker = IconButton("\uE767", "展开或收起音量");
+        var sun = IconButton("\uE706", "展开或收起亮度");
         Launchers.Children.Add(_speaker);
         Launchers.Children.Add(sun);
         Host.Children.Add(_inlineHost);
         Host.Children.Add(Launchers);
-        System.Windows.Automation.AutomationProperties.SetAutomationId(_speaker, "SystemMute");
-        _speaker.Click += (_, _) => { VolumeHelper.ToggleMute(); SyncVolume(); };
+        _mute = IconButton("\uE767", "静音所有输出设备");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(_mute, "SystemMute");
+        _mute.Click += (_, _) =>
+        {
+            VolumeHelper.ToggleMute();
+            var error = VolumeHelper.LastError;
+            SyncVolume();
+            _audioError.Text = error ?? "";
+        };
 
         var grid = new Grid { Margin = new Thickness(16), Focusable = true };
         _grid = grid;
         grid.ColumnDefinitions.Add(new ColumnDefinition());
-        grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var audio = Column(_volumeLabel, _volumeText, _volume);
+        _audio = audio;
+        audio.Children.Add(_mute);
+        _audioError.FontSize = 10;
+        _audioError.TextWrapping = TextWrapping.Wrap;
+        audio.Children.Add(_audioError);
         var light = Column(_lightLabel, _lightText, _light);
+        _lighting = light;
         grid.Children.Add(audio);
-        Grid.SetColumn(light, 1);
+
         grid.Children.Add(light);
         _error.FontSize = 11;
         _error.TextWrapping = TextWrapping.Wrap;
@@ -89,7 +107,6 @@ internal sealed class SystemControls : IDisposable
         _error.MaxHeight = 60;
         _error.Margin = new Thickness(0, 10, 0, 0);
         Grid.SetRow(_error, 1);
-        Grid.SetColumnSpan(_error, 2);
         grid.Children.Add(_error);
         _panel = new Border { Background = new SolidColorBrush(Color.FromRgb(37, 42, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(95, 107, 126)), BorderThickness = new Thickness(1),
@@ -100,29 +117,42 @@ internal sealed class SystemControls : IDisposable
             Child = _panel,
         };
         grid.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { Close(); e.Handled = true; } };
-        sun.Click += (_, _) =>
+        _popup.Closed += (_, _) => _closedOnLauncher = _speaker.IsMouseOver || sun.IsMouseOver;
+        void Toggle(bool audio, Button anchor)
         {
-            if (AtDock)
+            var open = AtDock ? _inlineHost.Visibility == Visibility.Visible : _popup.IsOpen;
+            if ((open || _closedOnLauncher) && _showingAudio == audio)
             {
-                _inlineHost.Visibility = _inlineHost.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
-                if (_inlineHost.Visibility == Visibility.Visible) grid.Focus();
+                _closedOnLauncher = false;
+                Close();
+                return;
             }
+            _closedOnLauncher = false;
+            _showingAudio = audio;
+            _audio.Visibility = audio ? Visibility.Visible : Visibility.Collapsed;
+            _lighting.Visibility = audio ? Visibility.Collapsed : Visibility.Visible;
+            _error.Visibility = !audio && !string.IsNullOrEmpty(_error.Text) ? Visibility.Visible : Visibility.Collapsed;
+            if (AtDock) _inlineHost.Visibility = Visibility.Visible;
             else
             {
-                _popup.PlacementTarget = sun;
+                _popup.PlacementTarget = anchor;
                 _popup.Placement = PlacementMode.Bottom;
-                _popup.IsOpen = !_popup.IsOpen;
-                if (_popup.IsOpen) grid.Focus();
+                _popup.IsOpen = true;
             }
-            _ = ReadBrightnessAsync();
-        };
+            grid.Focus();
+            if (!audio) _ = ReadBrightnessAsync();
+        }
+        _speaker.Click += (_, _) => Toggle(true, _speaker);
+        sun.Click += (_, _) => Toggle(false, sun);
         TrackDrag(_volume, value => _volumeDragging = value);
         TrackDrag(_light, value => _lightDragging = value);
         _volume.ValueChanged += (_, e) =>
         {
             if (_syncing) return;
             VolumeHelper.Set((int)e.NewValue);
+            var error = VolumeHelper.LastError;
             SyncVolume();
+            _audioError.Text = error ?? "";
         };
         _light.ValueChanged += (_, e) =>
         {
@@ -145,12 +175,14 @@ internal sealed class SystemControls : IDisposable
         try
         {
             var ready = VolumeHelper.TryRead(out var percent, out var muted);
-            _volume.IsEnabled = _speaker.IsEnabled = ready;
+            _volume.IsEnabled = _mute.IsEnabled = ready;
+            _audioError.Text = ready ? "" : VolumeHelper.LastError ?? "声音设备不可用";
             _volumeText.Text = ready ? $"{percent}%" : "不可用";
             if (!_volumeDragging && ready) _volume.Value = percent;
-            ((TextBlock)_speaker.Content).Text = muted || percent == 0 ? "\uE74F" : "\uE767";
-            _speaker.ToolTip = muted ? "取消静音" : "静音";
-            System.Windows.Automation.AutomationProperties.SetName(_speaker, muted ? "取消静音" : "静音");
+            ((TextBlock)_speaker.Content).Text = muted ? "\uE74F" : "\uE767";
+            ((TextBlock)_mute.Content).Text = muted ? "\uE74F" : "\uE767";
+            _mute.ToolTip = muted ? "取消所有输出设备静音" : "静音所有输出设备";
+            System.Windows.Automation.AutomationProperties.SetName(_mute, (string)_mute.ToolTip);
         }
         finally { _syncing = false; }
     }
@@ -194,7 +226,7 @@ internal sealed class SystemControls : IDisposable
             if (state.Percent is { } value && !_lightDragging) _light.Value = value;
             _error.Text = state.Error ?? "";
             _error.ToolTip = state.Error;
-            _error.Visibility = state.Error == null ? Visibility.Collapsed : Visibility.Visible;
+            _error.Visibility = state.Error == null || _showingAudio ? Visibility.Collapsed : Visibility.Visible;
         }
         finally { _syncing = false; }
     }
@@ -202,6 +234,7 @@ internal sealed class SystemControls : IDisposable
     internal void Close()
     {
         _popup.IsOpen = false;
+        _closedOnLauncher = false;
         _inlineHost.Visibility = Visibility.Collapsed;
     }
 
