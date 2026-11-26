@@ -4,7 +4,7 @@
 
 如果你也需要一个这样的学习环境，可以试试。
 
-[下载最新版](https://github.com/ai-lcs/focus-desktop/releases/latest) · [2.0.0 更新说明](docs/releases/v2.0.0.md)
+[下载最新版](https://github.com/ai-lcs/focus-desktop/releases/latest) · [2.1.5 更新说明](docs/releases/v2.1.5.md)
 
 ## 用起来是什么样
 
@@ -17,19 +17,19 @@
 还有这些日常会用到的功能：
 
 - 网站白名单、自定义网站，同一网站可以开多个标签；登录状态保存在本机。
-- 自选学习文件夹，支持查看 PDF、图片和 TXT 等。
+- 自选学习文件夹，支持查看 PDF、图片、TXT 和 Markdown。
 - 自由计时、番茄钟、首页专注语，以及可选的 Hard Focus。开启 Hard Focus 后，当前专注段内不能通过退出按钮离开。你要是有急事你就重启吧😂。
 - 切换网页和软件时保留页面、计时等功能。返回学习桌面不会结束外部程序。
 
 ## 下载与首次设置
 
-目前提供 Windows x64 版本，最新版是 **2.0.0**。
+目前提供 Windows x64 版本，最新版是 **2.1.5**。
 
 | 下载 | 怎么选 |
 | --- | --- |
-| [安装版](https://github.com/ai-lcs/focus-desktop/releases/download/v2.0.0/FocusDesk-Setup-2.0.0.exe) | （建议）大多数人选这个。 |
-| [便携版](https://github.com/ai-lcs/focus-desktop/releases/download/v2.0.0/focus-desk-portable-2.0.0.zip) | 解压到独立文件夹，运行 `focus-desktop.exe`。 |
-| [SHA-256 校验清单](https://github.com/ai-lcs/focus-desktop/releases/download/v2.0.0/focus-desk-2.0.0-sha256.txt) | 用于核对下载的文件。 |
+| [安装版](https://github.com/ai-lcs/focus-desktop/releases/download/v2.1.5/FocusDesk-Setup-2.1.5.exe) | （建议）大多数人选这个。 |
+| [便携版](https://github.com/ai-lcs/focus-desktop/releases/download/v2.1.5/focus-desk-portable-2.1.5.zip) | 解压到独立文件夹，运行 `focus-desktop.exe`。 |
+| [SHA-256 校验清单](https://github.com/ai-lcs/focus-desktop/releases/download/v2.1.5/focus-desk-2.1.5-sha256.txt) | 用于核对下载的文件。 |
 
 程序自带 .NET 运行时，网页部分需要 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。安装包没有代码签名，Windows 首次运行可能弹出警告，你直接“无视风险，继续安装”，我可以保证没有病毒🤔。
 
@@ -38,7 +38,7 @@
 1. 选学习文件夹。选你放资料的位置，不要选程序或应用数据目录。
 2. 选学习网站，也可以添加自己的网址。
 3. 设置退出短语、专注语和番茄钟。
-4. 选择需要的软件，或者点击“跳过软件，仅使用学习桌面”。我这里设置的是从桌面快捷方式选择。
+4. 按名称搜索并选择需要的软件，或者点击“跳过软件，仅使用学习桌面”。候选包含开始菜单、Windows 应用列表和桌面快捷方式等，支持手动添加。
 
 配置完成后先登录需要的网站，再点首页的“开始专注”。软件可以从桌面快捷方式中选择，也可以浏览其他位置；支持可解析的 `.lnk`、`.exe` 和打包应用入口。
 

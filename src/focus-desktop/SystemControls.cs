@@ -87,9 +87,6 @@ internal sealed class SystemControls : IDisposable
 
         var grid = new Grid { Margin = new Thickness(16), Focusable = true };
         _grid = grid;
-        grid.ColumnDefinitions.Add(new ColumnDefinition());
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var audio = Column(_volumeLabel, _volumeText, _volume);
         _audio = audio;
         audio.Children.Add(_mute);
@@ -98,16 +95,15 @@ internal sealed class SystemControls : IDisposable
         audio.Children.Add(_audioError);
         var light = Column(_lightLabel, _lightText, _light);
         _lighting = light;
+        light.Visibility = Visibility.Hidden;
         grid.Children.Add(audio);
-
         grid.Children.Add(light);
         _error.FontSize = 11;
         _error.TextWrapping = TextWrapping.Wrap;
         _error.MaxWidth = 192;
         _error.MaxHeight = 60;
         _error.Margin = new Thickness(0, 10, 0, 0);
-        Grid.SetRow(_error, 1);
-        grid.Children.Add(_error);
+        light.Children.Add(_error);
         _panel = new Border { Background = new SolidColorBrush(Color.FromRgb(37, 42, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(95, 107, 126)), BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6), Child = grid, Width = 224 };
@@ -129,9 +125,9 @@ internal sealed class SystemControls : IDisposable
             }
             _closedOnLauncher = false;
             _showingAudio = audio;
-            _audio.Visibility = audio ? Visibility.Visible : Visibility.Collapsed;
-            _lighting.Visibility = audio ? Visibility.Collapsed : Visibility.Visible;
-            _error.Visibility = !audio && !string.IsNullOrEmpty(_error.Text) ? Visibility.Visible : Visibility.Collapsed;
+            // Measure both layouts so the card and slider stay in place when switching.
+            _audio.Visibility = audio ? Visibility.Visible : Visibility.Hidden;
+            _lighting.Visibility = audio ? Visibility.Hidden : Visibility.Visible;
             if (AtDock) _inlineHost.Visibility = Visibility.Visible;
             else
             {
@@ -226,7 +222,7 @@ internal sealed class SystemControls : IDisposable
             if (state.Percent is { } value && !_lightDragging) _light.Value = value;
             _error.Text = state.Error ?? "";
             _error.ToolTip = state.Error;
-            _error.Visibility = state.Error == null || _showingAudio ? Visibility.Collapsed : Visibility.Visible;
+            _error.Visibility = state.Error == null ? Visibility.Collapsed : Visibility.Visible;
         }
         finally { _syncing = false; }
     }

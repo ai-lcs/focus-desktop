@@ -94,22 +94,30 @@ internal sealed partial class RuntimeApp
         var mute = (System.Windows.Controls.Button)Field(controls, "_mute")!;
         var audio = (StackPanel)Field(controls, "_audio")!;
         var light = (StackPanel)Field(controls, "_lighting")!;
+        var panel = (Border)Field(controls, "_panel")!;
+        var volumeSlider = (Slider)Field(controls, "_volume")!;
+        var brightnessSlider = (Slider)Field(controls, "_light")!;
+        Rect SliderBounds(Slider slider) => new(slider.TranslatePoint(new System.Windows.Point(), panel), slider.RenderSize);
         try
         {
             var initialMute = VolumeHelper.IsMuted();
             speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-            var panel = (Border)Field(controls, "_panel")!;
             var origin = panel.TranslatePoint(new System.Windows.Point(), sidebar);
-            Check(audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Collapsed && !popup.IsOpen
+            Check(audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Hidden && !popup.IsOpen
                 && origin.X >= 0 && origin.X + panel.ActualWidth <= 96.1, "speaker opens only volume inside sidebar");
             Check(VolumeHelper.IsMuted() == initialMute, "outer speaker does not change native mute");
+            var volumePanelSize = panel.RenderSize;
+            var volumeSliderBounds = SliderBounds(volumeSlider);
             speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
             Check(inline.Visibility == Visibility.Collapsed, "outer speaker closes volume");
             sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
-            Check(light.Visibility == Visibility.Visible && audio.Visibility == Visibility.Collapsed, "sun opens only brightness");
+            window.UpdateLayout();
+            Check(panel.RenderSize == volumePanelSize && SliderBounds(brightnessSlider) == volumeSliderBounds,
+                "sidebar panels have identical dimensions and slider alignment");
+            Check(light.Visibility == Visibility.Visible && audio.Visibility == Visibility.Hidden, "sun opens only brightness");
             speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
-            Check(audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Collapsed, "switching icons replaces the panel");
+            Check(audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Hidden, "switching icons replaces the panel");
             mute.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
             Check(VolumeHelper.IsMuted() != initialMute, "inner speaker changes verified system-wide playback mute");
             mute.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
@@ -139,10 +147,16 @@ internal sealed partial class RuntimeApp
         sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         Check(popup.IsOpen && inline.Visibility == Visibility.Collapsed,
             "without a sidebar the sun icon still opens the controls from the top bar");
+        panel.UpdateLayout();
+        var brightnessPopupSize = panel.RenderSize;
+        var brightnessPopupSliderBounds = SliderBounds(brightnessSlider);
         sun.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         Check(!popup.IsOpen, "top bar sun closes its brightness panel");
         speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
-        Check(popup.IsOpen && audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Collapsed,
+        panel.UpdateLayout();
+        Check(panel.RenderSize == brightnessPopupSize && SliderBounds(volumeSlider) == brightnessPopupSliderBounds,
+            "top bar panels have identical dimensions and slider alignment");
+        Check(popup.IsOpen && audio.Visibility == Visibility.Visible && light.Visibility == Visibility.Hidden,
             "top bar speaker opens only volume");
         speaker.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         Check(!popup.IsOpen, "top bar speaker closes its volume panel");
